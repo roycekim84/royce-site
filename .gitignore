@@ -1,0 +1,11 @@
+# secrets (카페24)
+cafe24/internal-api/_bootstrap.php
+cafe24/internal-api/_auth.php
+
+# worker local secrets
+worker/.dev.vars
+
+# local
+worker/.wrangler/
+node_modules/
+.DS_Store
