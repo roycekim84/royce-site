@@ -59,6 +59,28 @@ async function readJson(req: Request) {
   try { return await req.json(); } catch { return null; }
 }
 
+function buildSessionCookie(req: Request, token: string) {
+  const isHttps = new URL(req.url).protocol === "https:";
+  const parts = [
+    `session=${token}`,
+    "Path=/",
+    "HttpOnly",
+    `Max-Age=${60 * 60 * 24 * 7}`, // 7일
+  ];
+
+  if (isHttps) {
+    // ✅ 크로스사이트( pages.dev -> workers.dev )에서 쿠키 붙이려면 필요
+    parts.push("Secure");
+    parts.push("SameSite=None");
+  } else {
+    // 로컬 http 개발용
+    parts.push("SameSite=Lax");
+  }
+
+  return parts.join("; ");
+}
+
+
 /* ---------------- JWT HS256 (same as v0.4) ---------------- */
 function b64urlEncode(bytes: ArrayBuffer | Uint8Array): string {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -180,6 +202,8 @@ async function callCafe24(env: Env, path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers || {});
   headers.set("X-Internal-Token", env.INTERNAL_TOKEN);
   headers.set("Accept", "application/json");
+  // 카페24 WAF가 Worker UA를 막는 경우가 있어 브라우저 UA로 우회
+  headers.set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36");
 
   // ✅ GET 요청에는 Content-Type 넣지 않기 (카페24/WAF에서 406 원인)
   if (method !== "GET") {
@@ -566,8 +590,14 @@ export default {
 
         const res = json({ ok:true, user:{ id:user.id, email:user.email } });
         const headers = new Headers(res.headers);
-        headers.append("Set-Cookie", makeSessionCookie(req, token));
-        return withCors(req, env, new Response(res.body, { status:200, headers }));
+        const cookie = buildSessionCookie(req, token);
+
+        return withCors(req, env, json({ ok: true, user }, {
+          headers: { "Set-Cookie": cookie }
+        }));
+
+        //headers.append("Set-Cookie", makeSessionCookie(req, token));
+        //return withCors(req, env, new Response(res.body, { status:200, headers }));
       } catch (e:any) {
         return withCors(req, env, json({ ok:false, error:String(e?.message ?? e) }, { status:500 }));
       }
