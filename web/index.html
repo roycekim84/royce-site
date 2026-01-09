@@ -7,7 +7,7 @@
   <style>
     :root { --bg:#0b1220; --panel:#0f172a; --card:#111b33; --line:#223055; --text:#e9eefc; --muted:#9fb0d0; --btn:#3b82f6; --danger:#ef4444; }
     *{box-sizing:border-box}
-    body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+    body{overflow-x:hidden;margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
     button,input{font:inherit}
     .app{height:100vh;display:grid;grid-template-columns: 360px 1fr;}
     .side{border-right:1px solid var(--line);background:var(--panel);padding:16px;display:flex;flex-direction:column;gap:12px;overflow:auto;}
@@ -50,9 +50,9 @@
       .side{border-right:none;border-bottom:1px solid var(--line);overflow:visible}
       .main{overflow:visible;padding:14px}
       .top{position:sticky;top:0;z-index:20;background:var(--panel);padding-top:6px;padding-bottom:10px}
-      /* topics -> horizontal chips */
-      #topics{flex-direction:row;overflow:auto;gap:10px;padding:6px 2px 10px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
-      .topic{flex:0 0 auto;min-width:240px;scroll-snap-align:start}
+      /* topics: no horizontal scroll (stacked) */
+      #topics{flex-direction:column;overflow:visible;gap:10px;padding:6px 0 10px}
+      .topic{flex:1 1 auto;min-width:unset;width:100%}
       .topic .topic-slug{display:none}
       /* article header layout */
       .article-line{flex-direction:column;align-items:flex-start}
