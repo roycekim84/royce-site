@@ -387,6 +387,7 @@
     topicsTitle.textContent = "주제";
     topicsDesc.textContent = "주제를 누르면 해당 주제의 기사(최신순)가 나온다.";
     setStatus(topicsStatusGuest, "");
+    const loginCard = $("auth-card");
 
     try{
       // 로그인 여부 판정
@@ -395,6 +396,13 @@
 
       who.textContent = me.user.email;
       whoHint.textContent = "관리자 모드";
+      if (isLoggedIn) {
+        loginCard.style.display = "none";
+        // 상단에 이미 로그아웃/관리자 모드 표시되게
+      } else {
+        loginCard.style.display = "block";
+      }
+
       $("btn-logout").style.display = "inline-block";
       topicControls.style.display = "block";
       topicsTitle.textContent = "내 주제";
@@ -418,7 +426,7 @@
         const topics = await loadTopics();
         if(!currentTopic && topics.length>0) currentTopic = topics[0];
         renderTopics(topics);
-
+        loginCard.style.display = "block";
         if(currentTopic) await loadArticlesList();
         else {
           hint.style.display="block";
