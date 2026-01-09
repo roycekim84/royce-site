@@ -59,26 +59,39 @@ async function readJson(req: Request) {
   try { return await req.json(); } catch { return null; }
 }
 
-function buildSessionCookie(req: Request, token: string) {
+function buildSessionCookie(req: Request, token: string, maxAgeSec = 60 * 60 * 24 * 7) {
   const isHttps = new URL(req.url).protocol === "https:";
   const parts = [
     `session=${token}`,
     "Path=/",
     "HttpOnly",
-    `Max-Age=${60 * 60 * 24 * 7}`, // 7일
+    `Max-Age=${maxAgeSec}`,
   ];
-
   if (isHttps) {
-    // ✅ 크로스사이트( pages.dev -> workers.dev )에서 쿠키 붙이려면 필요
-    parts.push("Secure");
-    parts.push("SameSite=None");
+    parts.push("Secure", "SameSite=None");
   } else {
-    // 로컬 http 개발용
     parts.push("SameSite=Lax");
   }
-
   return parts.join("; ");
 }
+
+function clearSessionCookie_new(req: Request) {
+  // ✅ 삭제는 "같은 Path"로 + 만료
+  const isHttps = new URL(req.url).protocol === "https:";
+  const parts = [
+    "session=",
+    "Path=/",
+    "HttpOnly",
+    "Max-Age=0",
+  ];
+  if (isHttps) {
+    parts.push("Secure", "SameSite=None");
+  } else {
+    parts.push("SameSite=Lax");
+  }
+  return parts.join("; ");
+}
+
 
 
 /* ---------------- JWT HS256 (same as v0.4) ---------------- */
@@ -606,8 +619,11 @@ export default {
     if (req.method === "POST" && url.pathname === "/api/auth/logout") {
       const res = json({ ok:true });
       const headers = new Headers(res.headers);
-      headers.append("Set-Cookie", clearSessionCookie(req));
-      return withCors(req, env, new Response(res.body, { status:200, headers }));
+      const cookie = clearSessionCookie_new(req);
+      return withCors(req, env, json({ ok: true }, { headers: { "Set-Cookie": cookie } }));
+
+      //headers.append("Set-Cookie", clearSessionCookie_new(req));
+      //return withCors(req, env, new Response(res.body, { status:200, headers }));
     }
 
     /* ---------- v0.6: me + my topics ---------- */

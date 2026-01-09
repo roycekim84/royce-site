@@ -396,12 +396,7 @@
 
       who.textContent = me.user.email;
       whoHint.textContent = "관리자 모드";
-      if (isLoggedIn) {
-        loginCard.style.display = "none";
-        // 상단에 이미 로그아웃/관리자 모드 표시되게
-      } else {
-        loginCard.style.display = "block";
-      }
+      loginCard.style.display = "none";
 
       $("btn-logout").style.display = "inline-block";
       topicControls.style.display = "block";
