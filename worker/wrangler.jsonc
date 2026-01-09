@@ -11,7 +11,8 @@
 		"enabled": true
 	},
 	"vars": {
-    	"CAFE24_API_BASE": "https://roycelab.mycafe24.com/internal-api"
+    	"CAFE24_API_BASE": "https://roycelab.mycafe24.com/internal-api",
+		"ALLOWED_ORIGINS": "https://royce-site.pages.dev"
   	},
 	"triggers": {
 		"crons": ["0 21 * * *", "0 9 * * *"]

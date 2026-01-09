@@ -21,6 +21,17 @@ function json(data: unknown, init: ResponseInit = {}) {
   });
 }
 
+type JsonRecord = Record<string, unknown>;
+
+async function readJson_new<T extends JsonRecord = JsonRecord>(req: Request): Promise<T> {
+  try {
+    return (await req.json()) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
+
 function getAllowedOrigin(req: Request, env: Env): string | null {
   const origin = req.headers.get("Origin");
   if (!origin) return null;
@@ -45,7 +56,7 @@ function withCors(req: Request, env: Env, res: Response) {
 async function readJson(req: Request) {
   const ct = req.headers.get("content-type") || "";
   if (!ct.includes("application/json")) return null;
-  try { return await req.json<any>(); } catch { return null; }
+  try { return await req.json(); } catch { return null; }
 }
 
 /* ---------------- JWT HS256 (same as v0.4) ---------------- */
@@ -448,35 +459,85 @@ export default {
       return withCors(req, env, json({ ok:true, service:"worker", v:"0.6", ts:new Date().toISOString() }));
     }
 
-    /* ---------- auth (same behavior) ---------- */
-    if (req.method === "POST" && url.pathname === "/api/auth/register") {
-      const body = await readJson(req);
-      const email = body?.email ? String(body.email).trim() : "";
-      const password = body?.password ? String(body.password) : "";
-      if (!email || !email.includes("@")) return withCors(req, env, json({ ok:false, error:"Invalid email" }, { status:400 }));
-      if (!password || password.length < 8) return withCors(req, env, json({ ok:false, error:"Password must be at least 8 characters" }, { status:400 }));
-
+    // ---------- public read-only (no login required) ----------
+    // GET /api/public/topics
+    if (req.method === "GET" && url.pathname === "/api/public/topics") {
       try {
-        const { r, data } = await callCafe24(env, "users_create.php", { method:"POST", body: JSON.stringify({ email, password }) });
-        if (!r.ok) return withCors(req, env, json({ ok:false, error: data?.error || "Register failed" }, { status:r.status }));
-
-        const user = data.user;
-        const now = Math.floor(Date.now()/1000);
-        const token = await signJwt({ sub:String(user.id), email:user.email, iat:now, exp: now + 60*60*24*7 }, env);
-
-        const res = json({ ok:true, user:{ id:user.id, email:user.email } }, { status:201 });
-        const headers = new Headers(res.headers);
-        headers.append("Set-Cookie", makeSessionCookie(req, token));
-        return withCors(req, env, new Response(res.body, { status:201, headers }));
-      } catch (e:any) {
-        return withCors(req, env, json({ ok:false, error:String(e?.message ?? e) }, { status:500 }));
+        const topics = await getActiveTopics(env);
+        return withCors(req, env, json({ ok: true, topics }));
+      } catch (e: any) {
+        return withCors(req, env, json({ ok: false, error: String(e?.message ?? e) }, { status: 500 }));
       }
     }
 
+    // GET /api/public/articles?topic_id=123&limit=20
+    if (req.method === "GET" && url.pathname === "/api/public/articles") {
+      const topic_id = Number(url.searchParams.get("topic_id") || "0");
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || "20"), 1), 50);
+      if (!Number.isInteger(topic_id) || topic_id <= 0) {
+        return withCors(req, env, json({ ok: false, error: "Invalid topic_id" }, { status: 400 }));
+      }
+
+      try {
+        const active = await getActiveTopics(env);
+        if (!active.find(t => t.id === topic_id)) {
+          return withCors(req, env, json({ ok: false, error: "Topic not available" }, { status: 404 }));
+        }
+
+        const { r, data } = await callCafe24(env, "articles_list.php", {
+          method: "POST",
+          body: JSON.stringify({ topic_id, limit }),
+        });
+        if (!r.ok) return withCors(req, env, json({ ok: false, error: "articles_list failed", cafe24: data }, { status: 502 }));
+
+        return withCors(req, env, json({ ok: true, articles: data?.articles ?? [] }));
+      } catch (e: any) {
+        return withCors(req, env, json({ ok: false, error: String(e?.message ?? e) }, { status: 500 }));
+      }
+    }
+
+    // GET /api/public/article?article_id=999
+    if (req.method === "GET" && url.pathname === "/api/public/article") {
+      const article_id = Number(url.searchParams.get("article_id") || "0");
+      if (!Number.isInteger(article_id) || article_id <= 0) {
+        return withCors(req, env, json({ ok: false, error: "Invalid article_id" }, { status: 400 }));
+      }
+
+      try {
+        const { r, data } = await callCafe24(env, "article_get.php", {
+          method: "POST",
+          body: JSON.stringify({ article_id }),
+        });
+        if (!r.ok) return withCors(req, env, json({ ok: false, error: "article_get failed", cafe24: data }, { status: 502 }));
+
+        const article = data?.article ?? null;
+        if (!article) return withCors(req, env, json({ ok: true, article: null }));
+
+        const active = await getActiveTopics(env);
+        const tid = Number(article.topic_id || 0);
+        if (!active.find(t => t.id === tid)) {
+          return withCors(req, env, json({ ok: false, error: "Article not available" }, { status: 404 }));
+        }
+
+        return withCors(req, env, json({ ok: true, article }));
+      } catch (e: any) {
+        return withCors(req, env, json({ ok: false, error: String(e?.message ?? e) }, { status: 500 }));
+      }
+    }
+
+
+    /* ---------- auth (same behavior) ---------- */
+    if (req.method === "POST" && url.pathname === "/api/auth/register") {
+      // v0.6 public-mode: sign-up disabled (login only)
+      return withCors(req, env, json({ ok:false, error:"Not Found" }, { status:404 }));
+    }
+
+
     if (req.method === "POST" && url.pathname === "/api/auth/login") {
-      const body = await readJson(req);
-      const email = body?.email ? String(body.email).trim() : "";
-      const password = body?.password ? String(body.password) : "";
+      const body = await readJson_new<{ email?: string; password?: string }>(req);
+      const email = String(body.email ?? "").trim().toLowerCase();
+      const password = String(body.password ?? "");
+
       if (!email || !email.includes("@")) return withCors(req, env, json({ ok:false, error:"Invalid email" }, { status:400 }));
       if (!password) return withCors(req, env, json({ ok:false, error:"Missing password" }, { status:400 }));
 
@@ -539,8 +600,8 @@ export default {
       const auth = await requireUser(req, env);
       if (!auth.ok) return withCors(req, env, json({ ok:false, error:auth.error }, { status:auth.status }));
 
-      const body = await readJson(req);
-      const title = body?.title ? String(body.title).trim() : "";
+      const body = await readJson_new<{ title?: string }>(req);
+      const title = String(body.title ?? "").trim();
       if (!title) return withCors(req, env, json({ ok:false, error:"Missing title" }, { status:400 }));
 
       // 1) topic upsert
