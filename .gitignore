@@ -1,11 +1,22 @@
-# secrets (카페24)
-cafe24/internal-api/_bootstrap.php
-cafe24/internal-api/_auth.php
-
-# worker local secrets
-worker/.dev.vars
-
-# local
-worker/.wrangler/
-node_modules/
+# OS
 .DS_Store
+
+# Node
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Wrangler / Workers temp
+worker/.wrangler/
+worker/wrangler/tmp/
+worker/.dev.vars
+worker/.env
+worker/.env.*
+
+# Cafe24 internal api (절대 올리면 안 됨)
+cafe24/
+
+# 기타
+.env
+.env.*

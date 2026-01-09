@@ -1,7 +1,468 @@
 <!doctype html>
-<html>
-  <head><meta charset="utf-8"><title>Royce Site</title></head>
-  <body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;">
-    <img src="/hero.jpg" alt="hero" style="max-width:100%;height:auto;" />
-  </body>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Royce Site v0.6</title>
+  <style>
+    :root { --bg:#0b1220; --panel:#0f172a; --card:#111b33; --line:#223055; --text:#e9eefc; --muted:#9fb0d0; --btn:#3b82f6; --danger:#ef4444; }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+    button,input{font:inherit}
+    .app{height:100vh;display:grid;grid-template-columns: 360px 1fr;}
+    .side{border-right:1px solid var(--line);background:var(--panel);padding:16px;display:flex;flex-direction:column;gap:12px;overflow:auto;}
+    .main{padding:18px;overflow:auto;}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;}
+    .badge{display:inline-block;font-size:12px;padding:4px 8px;border-radius:999px;background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.25);color:#c7d2fe;}
+    .card{background:rgba(17,27,51,.85);border:1px solid var(--line);border-radius:14px;padding:14px;}
+    .muted{color:var(--muted);font-size:13px;line-height:1.4}
+    .row{display:flex;gap:10px}
+    input{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#0b1430;color:var(--text);outline:none}
+    button{padding:10px 12px;border-radius:12px;border:1px solid transparent;background:var(--btn);color:white;font-weight:800;cursor:pointer}
+    button.secondary{background:transparent;border-color:var(--line);color:var(--text)}
+    button.danger{background:transparent;border-color:rgba(239,68,68,.6);color:#fecaca}
+    button:disabled{opacity:.6;cursor:not-allowed}
+
+    .topic{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#0b1430;cursor:pointer}
+    .topic.active{border-color:rgba(59,130,246,.7);box-shadow:0 0 0 2px rgba(59,130,246,.15) inset}
+    .topic .t{font-weight:900}
+    .topic .x{font-size:12px;color:#fecaca;border:1px solid rgba(239,68,68,.4);padding:3px 8px;border-radius:999px}
+
+    .status{white-space:pre-wrap;color:var(--muted);font-size:13px;margin-top:8px}
+
+    .article-list { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+    .article-row { border:1px solid var(--line); background:#0b1430; border-radius:12px; padding:10px 12px; cursor:pointer; }
+    .article-row:hover { border-color: rgba(59,130,246,.5); }
+    .article-line { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .article-title { font-weight:900; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .article-date { color:var(--muted); font-size:12px; flex:0 0 auto; }
+    .article-body { margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
+    pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:14px;line-height:1.5;color:#dbe7ff}
+  </style>
+</head>
+<body>
+<script>
+  // ✅ 여기만 너 환경에 맞게
+  // 로컬: "http://localhost:8787"
+  // 운영: "https://api.너도메인.com"
+  const API_BASE = "http://localhost:8787";
+</script>
+
+<div class="app">
+  <div class="side">
+    <div class="top">
+      <div>
+        <div class="badge">v0.6</div>
+        <div style="margin-top:6px;font-weight:900" id="who">Guest</div>
+        <div class="muted" id="who-hint">로그인하면 주제 추가/삭제가 가능</div>
+      </div>
+      <button class="danger" id="btn-logout" type="button" style="display:none">로그아웃</button>
+    </div>
+
+    <!-- 로그인 (회원가입 제거) -->
+    <div class="card" id="auth-card">
+      <div style="font-weight:900;margin-bottom:6px">로그인</div>
+      <div class="muted">로그인하지 않아도 주제/기사는 볼 수 있어.</div>
+      <div style="height:10px"></div>
+      <input id="email" type="email" placeholder="email" autocomplete="email">
+      <div style="height:8px"></div>
+      <input id="pass" type="password" placeholder="password" autocomplete="current-password">
+      <div style="height:10px"></div>
+      <button id="btn-login">로그인</button>
+      <div class="status" id="auth-status"></div>
+    </div>
+
+    <!-- 주제 목록: 게스트도 보이기 -->
+    <div class="card" id="topics-card">
+      <div style="font-weight:900;margin-bottom:6px" id="topics-title">주제</div>
+      <div class="muted" id="topics-desc">원하는 주제를 누르면 해당 주제의 기사(최신순)가 나온다.</div>
+
+      <!-- 로그인한 나만: 주제 추가 -->
+      <div id="topic-controls" style="margin-top:10px; display:none;">
+        <div class="row">
+          <input id="new-topic" placeholder="예: 한국 AI 규제, 언리얼 엔진, 인디게임..." />
+          <button id="btn-add" type="button">추가</button>
+        </div>
+        <div class="status" id="topics-status"></div>
+      </div>
+
+      <div class="status" id="topics-status-guest"></div>
+      <div style="height:10px"></div>
+      <div id="topics"></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="card">
+      <div class="muted" id="hint">왼쪽에서 주제를 선택해줘.</div>
+
+      <div id="article-board" style="display:none">
+        <div class="muted" id="board-title"></div>
+        <div id="article-list" class="article-list"></div>
+      </div>
+
+      <div style="height:12px"></div>
+      <div class="row" id="actions" style="display:none">
+        <button class="secondary" id="btn-refresh" type="button">새로고침</button>
+        <button class="secondary" id="btn-clear" type="button">화면 정리</button>
+      </div>
+
+      <div class="status" id="main-status"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  const who = $("who");
+  const whoHint = $("who-hint");
+
+  const authCard = $("auth-card");
+  const authStatus = $("auth-status");
+
+  const topicsCard = $("topics-card");
+  const topicsTitle = $("topics-title");
+  const topicsDesc = $("topics-desc");
+  const topicControls = $("topic-controls");
+  const topicsStatus = $("topics-status");
+  const topicsStatusGuest = $("topics-status-guest");
+
+  const topicsEl = $("topics");
+  const hint = $("hint");
+  const board = $("article-board");
+  const boardTitle = $("board-title");
+  const listEl = $("article-list");
+
+  const mainStatus = $("main-status");
+  const actions = $("actions");
+
+  let isLoggedIn = false;
+  let currentTopic = null;
+  let openArticleId = null;
+  const articleCache = new Map(); // id -> full article
+
+  function setStatus(el, msg){ if(el) el.textContent = msg || ""; }
+
+  async function api(path, opt={}) {
+    const res = await fetch(API_BASE + path, {
+      credentials:"include",
+      ...opt,
+      headers: { "content-type":"application/json", ...(opt.headers||{}) }
+    });
+    let data=null;
+    try{ data=await res.json(); }catch{}
+    if(!res.ok){
+      const err=(data && (data.error||data.message)) || (res.status+" "+res.statusText);
+      throw new Error(err);
+    }
+    return data;
+  }
+
+  function escapeHtml(s){ return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"); }
+
+  function renderTopics(topics){
+    topicsEl.innerHTML = "";
+    if(!topics || topics.length===0){
+      topicsEl.innerHTML = `<div class="muted">표시할 주제가 없어.</div>`;
+      return;
+    }
+
+    for(const t of topics){
+      const div = document.createElement("div");
+      div.className = "topic" + (currentTopic?.id === t.id ? " active" : "");
+
+      const deleteHtml = isLoggedIn ? `<div class="x" data-del="1">삭제</div>` : ``;
+
+      div.innerHTML = `
+        <div style="min-width:0;">
+          <div class="t" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</div>
+          <div class="muted">${escapeHtml(t.slug || "")}</div>
+        </div>
+        ${deleteHtml}
+      `;
+
+      div.onclick = async (e) => {
+        // 로그인 유저만 삭제 가능
+        if(isLoggedIn && e.target && e.target.dataset && e.target.dataset.del){
+          await removeTopic(t.id);
+          return;
+        }
+        currentTopic = t;
+        document.querySelectorAll(".topic").forEach(x => x.classList.remove("active"));
+        div.classList.add("active");
+        openArticleId = null;
+        articleCache.clear();
+        await loadArticlesList();
+      };
+
+      topicsEl.appendChild(div);
+    }
+  }
+
+  async function loadTopics(){
+    if(isLoggedIn){
+      const data = await api("/api/my/topics");
+      return data.topics || [];
+    } else {
+      const data = await api("/api/public/topics");
+      // worker의 Topic은 {id, slug, title} 형태
+      const topics = (data.topics || []).map(t => ({ id:t.id, slug:t.slug, title:t.title }));
+      return topics;
+    }
+  }
+
+  async function loadArticlesList(){
+    if(!currentTopic) return;
+    setStatus(mainStatus, "기사 목록 불러오는 중...");
+    setStatus(hint, "");
+
+    const base = isLoggedIn ? "" : "/api/public";
+    const data = await api(`${base}/articles?topic_id=${encodeURIComponent(currentTopic.id)}&limit=20`);
+    const articles = data.articles || [];
+
+    if(articles.length === 0){
+      hint.style.display = "block";
+      board.style.display = "none";
+      setStatus(mainStatus, "아직 생성된 기사가 없어.");
+      return;
+    }
+
+    hint.style.display = "none";
+    board.style.display = "block";
+    boardTitle.textContent = `주제: ${currentTopic.title} — 최신 순`;
+
+    // 기본으로 최신 글 오픈
+    if(openArticleId === null) openArticleId = articles[0].id;
+
+    await renderAccordion(articles);
+    setStatus(mainStatus, "");
+  }
+
+  async function ensureArticleLoaded(articleId){
+    if(articleCache.has(articleId)) return articleCache.get(articleId);
+    const base = isLoggedIn ? "" : "/api/public";
+    const data = await api(`${base}/article?article_id=${encodeURIComponent(articleId)}`);
+    const a = data.article;
+    articleCache.set(articleId, a);
+    return a;
+  }
+
+  async function renderAccordion(articles){
+    listEl.innerHTML = "";
+
+    for(const a of articles){
+      const row = document.createElement("div");
+      row.className = "article-row";
+
+      const isOpen = (openArticleId !== null) && (Number(openArticleId) === Number(a.id));
+
+      row.innerHTML = `
+        <div class="article-line">
+          <div class="article-title">${escapeHtml(a.headline)}</div>
+          <div class="article-date">${escapeHtml(a.created_at || "")}</div>
+        </div>
+        <div class="article-body" style="display:${isOpen ? "block" : "none"}">
+          <div class="muted" style="margin-bottom:8px">
+            run: ${escapeHtml(a.run_type)} · period: ${escapeHtml(a.period_start)} ~ ${escapeHtml(a.period_end)} (KST)
+          </div>
+          <pre data-body="1">불러오는 중...</pre>
+        </div>
+      `;
+
+      row.onclick = async (e) => {
+        // 로그인 유저의 삭제 클릭은 여기 오기 전에 처리되지만, 안전하게 예외 처리
+        if(isLoggedIn && e.target && e.target.dataset && e.target.dataset.del) return;
+
+        // ✅ 토글: 열린 글 다시 누르면 닫힘
+        if(Number(openArticleId) === Number(a.id)) openArticleId = null;
+        else openArticleId = a.id;
+
+        await renderAccordion(articles);
+      };
+
+      listEl.appendChild(row);
+
+      if(isOpen){
+        const full = await ensureArticleLoaded(a.id);
+        const pre = row.querySelector('pre[data-body="1"]');
+        if(pre) pre.textContent = full?.body_md || "(본문 없음)";
+      }
+    }
+  }
+
+  async function addTopic(){
+    if(!isLoggedIn) return;
+
+    const title = $("new-topic").value.trim();
+    if(!title) return;
+
+    const addBtn = $("btn-add");
+    addBtn.disabled = true;
+
+    try{
+      setStatus(topicsStatus, "주제 추가 중...");
+      setStatus(mainStatus, "");
+
+      const data = await api("/api/my/topics", { method:"POST", body: JSON.stringify({ title }) });
+      $("new-topic").value = "";
+
+      // 새 주제로 선택
+      currentTopic = data.topic;
+
+      // 목록 갱신
+      const topics = await loadTopics();
+      renderTopics(topics);
+
+      // ✅ 주제 추가하면 자동으로 24시간 기사 1회 생성(이미 있으면 스킵)
+      let hasArticle = false;
+      try{
+        const chk = await api(`/api/articles?topic_id=${encodeURIComponent(currentTopic.id)}&limit=1`);
+        hasArticle = (chk.articles || []).length > 0;
+      }catch{}
+
+      if(!hasArticle){
+        setStatus(mainStatus, "최근 24시간 기사 자동 생성 중...");
+        openArticleId = null;
+        articleCache.clear();
+        try{
+          await api(`/api/articles/generate-24h?topic_id=${encodeURIComponent(currentTopic.id)}`, { method:"POST" });
+        }catch(e){
+          setStatus(mainStatus, "주제는 추가됐지만 기사 자동 생성 실패: " + e.message);
+        }
+      }
+
+      openArticleId = null;
+      articleCache.clear();
+      await loadArticlesList();
+
+      setStatus(topicsStatus, "추가 완료.");
+    } finally {
+      addBtn.disabled = false;
+    }
+  }
+
+  async function removeTopic(topicId){
+    if(!isLoggedIn) return;
+    setStatus(topicsStatus, "삭제 중...");
+    await api(`/api/my/topics?topic_id=${encodeURIComponent(topicId)}`, { method:"DELETE" });
+    setStatus(topicsStatus, "삭제 완료.");
+
+    if(currentTopic?.id === topicId) currentTopic = null;
+    openArticleId = null;
+    articleCache.clear();
+
+    const topics = await loadTopics();
+    renderTopics(topics);
+
+    if(!currentTopic && topics.length>0) currentTopic = topics[0];
+    if(currentTopic) await loadArticlesList();
+    else {
+      hint.style.display="block";
+      board.style.display="none";
+      setStatus(mainStatus, "주제가 없어.");
+    }
+  }
+
+  async function boot(){
+    // 기본: 게스트 모드로 먼저 로드
+    isLoggedIn = false;
+    who.textContent = "Guest";
+    whoHint.textContent = "로그인하면 주제 추가/삭제가 가능";
+    $("btn-logout").style.display = "none";
+    actions.style.display = "flex";
+    topicControls.style.display = "none";
+    topicsTitle.textContent = "주제";
+    topicsDesc.textContent = "주제를 누르면 해당 주제의 기사(최신순)가 나온다.";
+    setStatus(topicsStatusGuest, "");
+
+    try{
+      // 로그인 여부 판정
+      const me = await api("/api/me");
+      isLoggedIn = true;
+
+      who.textContent = me.user.email;
+      whoHint.textContent = "관리자 모드";
+      $("btn-logout").style.display = "inline-block";
+      topicControls.style.display = "block";
+      topicsTitle.textContent = "내 주제";
+      topicsDesc.textContent = "주제를 직접 입력해서 추가/삭제 가능. (추가 시 24시간 기사 1회 자동 생성)";
+      setStatus(topicsStatusGuest, "");
+
+      const topics = me.topics || [];
+      if(!currentTopic && topics.length>0) currentTopic = topics[0];
+      renderTopics(topics);
+
+      if(currentTopic) await loadArticlesList();
+      else {
+        hint.style.display="block";
+        board.style.display="none";
+        setStatus(mainStatus, "주제를 추가해줘.");
+      }
+      return;
+    } catch {
+      // 게스트 모드 유지
+      try{
+        const topics = await loadTopics();
+        if(!currentTopic && topics.length>0) currentTopic = topics[0];
+        renderTopics(topics);
+
+        if(currentTopic) await loadArticlesList();
+        else {
+          hint.style.display="block";
+          board.style.display="none";
+          setStatus(mainStatus, "표시할 주제가 없어.");
+        }
+      } catch(e) {
+        setStatus(topicsStatusGuest, "주제 로드 실패: " + e.message);
+      }
+    }
+  }
+
+  $("btn-login").onclick = async () => {
+    try{
+      setStatus(authStatus, "로그인 중...");
+      await api("/api/auth/login", { method:"POST", body: JSON.stringify({ email:$("email").value, password:$("pass").value }) });
+      setStatus(authStatus, "");
+      // 로그인 성공 → 관리자 모드로 재부팅
+      currentTopic = null;
+      openArticleId = null;
+      articleCache.clear();
+      await boot();
+    } catch(e){
+      setStatus(authStatus, "실패: " + e.message);
+    }
+  };
+
+  $("btn-logout").onclick = async () => {
+    await api("/api/auth/logout", { method:"POST" });
+    isLoggedIn = false;
+    currentTopic = null;
+    openArticleId = null;
+    articleCache.clear();
+    await boot();
+  };
+
+  // 관리자만 동작 (컨트롤은 로그인 시에만 보이지만, 안전하게)
+  $("btn-add") && ($("btn-add").onclick = addTopic);
+  $("new-topic") && $("new-topic").addEventListener("keydown", (e)=>{ if(e.key==="Enter") addTopic(); });
+
+  $("btn-refresh").onclick = async () => {
+    openArticleId = null;
+    articleCache.clear();
+    await loadArticlesList();
+  };
+
+  $("btn-clear").onclick = () => {
+    openArticleId = null;
+    articleCache.clear();
+    listEl.innerHTML = "";
+    board.style.display = "none";
+    hint.style.display = "block";
+    setStatus(mainStatus, "");
+  };
+
+  boot();
+</script>
+</body>
 </html>
