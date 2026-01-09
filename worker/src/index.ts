@@ -168,19 +168,34 @@ function clearSessionCookie(req: Request) {
 }
 
 /* ---------------- cafe24 internal api ---------------- */
-async function callCafe24(env: Env, path: string, init: RequestInit) {
+async function callCafe24(env: Env, path: string, init: RequestInit = {}) {
   const base = env.CAFE24_API_BASE?.replace(/\/$/, "");
   if (!base || !env.INTERNAL_TOKEN) throw new Error("Missing CAFE24_API_BASE or INTERNAL_TOKEN");
-  const url = `${base}/${path.replace(/^\//,"")}`;
+
+  const url = `${base}/${path.replace(/^\//, "")}`;
+
+  // method 기본값: body 있으면 POST, 아니면 GET
+  const method = (init.method ?? (init.body ? "POST" : "GET")).toUpperCase();
+
   const headers = new Headers(init.headers || {});
   headers.set("X-Internal-Token", env.INTERNAL_TOKEN);
-  headers.set("Content-Type", "application/json");
-  const r = await fetch(url, { ...init, headers });
+  headers.set("Accept", "application/json");
+
+  // ✅ GET 요청에는 Content-Type 넣지 않기 (카페24/WAF에서 406 원인)
+  if (method !== "GET") {
+    headers.set("Content-Type", "application/json; charset=utf-8");
+  } else {
+    headers.delete("Content-Type");
+  }
+
+  const r = await fetch(url, { ...init, method, headers });
+
   const text = await r.text();
   let data: any = text;
   try { data = JSON.parse(text); } catch {}
   return { r, data };
 }
+
 async function requireUser(req: Request, env: Env) {
   const token = getCookie(req, "session");
   if (!token) return { ok:false as const, status:401, error:"Not logged in" };
