@@ -373,6 +373,16 @@ function tokenize(s: string): string[] {
   return normalizeText(s).split(" ").filter(t => t.length >= 2);
 }
 
+function makeOneLineSummaryFromBody(bodyMd: string, maxLen = 140): string {
+  const line = String(bodyMd || "")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!line) return "";
+  return line.length > maxLen ? (line.slice(0, maxLen) + "…") : line;
+}
+
 function jaccardSimilarity(a: string[], b: string[]): number {
   const A = new Set(a);
   const B = new Set(b);
@@ -523,35 +533,43 @@ async function openaiMakeArticle(
     }),
   ].join("\n");
 
-  const r = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: env.OPENAI_MODEL,
-      input: prompt,
-      // JSON only 강제. 일부 모델에서 json_object보다 schema가 더 안정적이다.
-      text: {
-        format: {
-          type: "json_schema",
-          name: "article_summary",
-          strict: true,
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              headline: { type: "string" },
-              summary_1line: { type: "string" },
-              body_md: { type: "string" },
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  let r: Response;
+  try {
+    r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: env.OPENAI_MODEL,
+        input: prompt,
+        // JSON only 강제. 일부 모델에서 json_object보다 schema가 더 안정적이다.
+        text: {
+          format: {
+            type: "json_schema",
+            name: "article_summary",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                headline: { type: "string" },
+                summary_1line: { type: "string" },
+                body_md: { type: "string" },
+              },
+              required: ["headline", "summary_1line", "body_md"],
             },
-            required: ["headline", "summary_1line", "body_md"],
           },
         },
-      },
-    }),
-  });
+      }),
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   const raw = await r.text();
   if (!r.ok) throw new Error(`OpenAI error: ${r.status} ${raw}`);
@@ -594,8 +612,9 @@ async function openaiMakeArticle(
   if (!parsed) throw new Error(`OpenAI returned non-JSON text: ${text.slice(0, 240)}`);
 
   const headline = String(parsed.headline || "").trim();
-  const summary_1line = String(parsed.summary_1line || "").replace(/\s+/g, " ").trim();
+  let summary_1line = String(parsed.summary_1line || "").replace(/\s+/g, " ").trim();
   const body_md = String(parsed.body_md || "").trim();
+  if (!summary_1line && body_md) summary_1line = makeOneLineSummaryFromBody(body_md);
   if (!headline || !summary_1line || !body_md) throw new Error("Invalid OpenAI article json");
 
   return { headline, summary_1line: summary_1line.slice(0, 160), body_md };
@@ -669,7 +688,7 @@ async function generateArticleForTopic(env: Env, topic: Topic, runType:"morning"
   const mostlySame = !!prior && similarity >= 0.5 && noveltyTitles.length <= 2;
 
   // 3) 기사 생성 (OpenAI 실패하면 fallback 기사)
-  let article: { headline: string; summary_1line: string; body_md: string };
+  let article: { headline: string; summary_1line: string; body_md: string } | null = null;
   try {
     if (mostlySame) {
       article = {
@@ -693,21 +712,33 @@ async function generateArticleForTopic(env: Env, topic: Topic, runType:"morning"
         ].join("\n"),
       };
     } else {
-      article = await openaiMakeArticle(
-        env,
-        topic.title,
-        window.startKstStr,
-        window.endKstStr,
-        enrichedUsed.map(u => ({
-          title: u.title,
-          sourceName: u.sourceName,
-          domain: u.domain,
-          credibility: u.credibility,
-          snippet: u.snippet,
-        })),
-        prior,
-        noveltyTitles
-      );
+      let lastErr: unknown = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          article = await openaiMakeArticle(
+            env,
+            topic.title,
+            window.startKstStr,
+            window.endKstStr,
+            enrichedUsed.map(u => ({
+              title: u.title,
+              sourceName: u.sourceName,
+              domain: u.domain,
+              credibility: u.credibility,
+              snippet: u.snippet,
+            })),
+            prior,
+            noveltyTitles
+          );
+          lastErr = null;
+          break;
+        } catch (e) {
+          lastErr = e;
+          console.log("openai attempt failed:", topic.id, topic.title, `attempt=${attempt}`, String(e));
+          if (attempt < 2) await new Promise(r => setTimeout(r, 800));
+        }
+      }
+      if (lastErr) throw lastErr;
     }
   } catch (e) {
     console.log("openai summary fallback:", topic.id, topic.title, String(e));
@@ -733,6 +764,7 @@ async function generateArticleForTopic(env: Env, topic: Topic, runType:"morning"
       ].join("\n"),
     };
   }
+  if (!article) throw new Error("Article generation failed");
 
   // 4) DB 저장 (기사 + sources)
   const { r, data } = await callCafe24(env, "article_upsert.php", {
