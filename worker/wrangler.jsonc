@@ -15,7 +15,7 @@
 		"ALLOWED_ORIGINS": "https://royce-site.pages.dev"
   	},
 	"triggers": {
-		"crons": ["0 21 * * *", "0 9 * * *"]
+		"crons": ["0 21 * * *", "0 9 * * *", "0 0 1 * *"]
 	}
 	/**
 	 * Smart Placement

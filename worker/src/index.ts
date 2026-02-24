@@ -384,8 +384,23 @@ async function openaiMakeArticle(
     body: JSON.stringify({
       model: env.OPENAI_MODEL,
       input: prompt,
-      // JSON only 유도 (실패하면 fallback)
-      text: { format: { type: "json_object" } },
+      // JSON only 강제. 일부 모델에서 json_object보다 schema가 더 안정적이다.
+      text: {
+        format: {
+          type: "json_schema",
+          name: "article_summary",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              headline: { type: "string" },
+              body_md: { type: "string" },
+            },
+            required: ["headline", "body_md"],
+          },
+        },
+      },
     }),
   });
 
@@ -407,7 +422,27 @@ async function openaiMakeArticle(
     }
   }
   text = (text || "").trim();
-  const parsed = JSON.parse(text);
+
+  // 모델이 JSON 외 설명문/코드펜스를 섞는 경우를 대비한 복원 파싱
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    const fromFence = fenced?.[1]?.trim();
+    if (fromFence) {
+      try { parsed = JSON.parse(fromFence); } catch {}
+    }
+    if (!parsed) {
+      const l = text.indexOf("{");
+      const r = text.lastIndexOf("}");
+      if (l !== -1 && r !== -1 && r > l) {
+        const maybe = text.slice(l, r + 1);
+        try { parsed = JSON.parse(maybe); } catch {}
+      }
+    }
+  }
+  if (!parsed) throw new Error(`OpenAI returned non-JSON text: ${text.slice(0, 240)}`);
 
   const headline = String(parsed.headline || "").trim();
   const body_md = String(parsed.body_md || "").trim();
@@ -423,6 +458,15 @@ async function getActiveTopics(env: Env): Promise<Topic[]> {
   const { r, data } = await callCafe24(env, "active_topics.php", { method: "GET" });
   if (!r.ok) throw new Error(`active_topics failed: ${r.status}`);
   return (data?.topics ?? []) as Topic[];
+}
+
+async function purgeOldNews(env: Env, days = 30) {
+  const { r, data } = await callCafe24(env, "purge_old_news.php", {
+    method: "POST",
+    body: JSON.stringify({ days }),
+  });
+  if (!r.ok) throw new Error(`purge_old_news failed: ${r.status} ${JSON.stringify(data)}`);
+  return data;
 }
 
 async function generateArticleForTopic(env: Env, topic: Topic, runType:"morning"|"evening"|"manual", window: ReturnType<typeof getWindowKst>) {
@@ -445,7 +489,8 @@ async function generateArticleForTopic(env: Env, topic: Topic, runType:"morning"
       window.endKstStr,
       used.map(u => ({ title: u.title }))
     );
-  } catch {
+  } catch (e) {
+    console.log("openai summary fallback:", topic.id, topic.title, String(e));
     // fallback: 제목 기반 “브리핑 기사”
     const bullets = used.slice(0, 10).map(u => `- ${u.title}`).join("\n");
     article = {
@@ -485,6 +530,21 @@ async function generateArticleForTopic(env: Env, topic: Topic, runType:"morning"
 /* ---------------- API routes ---------------- */
 export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    const cronExpr = ((event as any).cron || "").trim();
+
+    // 월 1회(UTC 1일 00:00): 30일 지난 뉴스 정리
+    if (cronExpr === "0 0 1 * *") {
+      ctx.waitUntil((async () => {
+        try {
+          const result = await purgeOldNews(env, 30);
+          console.log("monthly purge done:", JSON.stringify(result));
+        } catch (e) {
+          console.log("monthly purge failed:", String(e));
+        }
+      })());
+      return;
+    }
+
     const runType = getRunTypeFromCron((event as any).cron);
     const window = getWindowKst(runType, event.scheduledTime);
 

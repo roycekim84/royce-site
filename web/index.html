@@ -97,11 +97,19 @@
       <div style="font-weight:900;margin-bottom:6px">로그인</div>
       <div class="muted">로그인하지 않아도 주제/기사는 볼 수 있어.</div>
       <div style="height:10px"></div>
-      <input id="email" type="email" placeholder="email" autocomplete="email">
-      <div style="height:8px"></div>
-      <input id="pass" type="password" placeholder="password" autocomplete="current-password">
-      <div style="height:10px"></div>
-      <button id="btn-login">로그인</button>
+      <button class="secondary" id="btn-auth-toggle" type="button">로그인 열기</button>
+
+      <div id="auth-form" style="display:none; margin-top:10px;">
+        <input id="email" type="email" placeholder="email" autocomplete="email">
+        <div style="height:8px"></div>
+        <input id="pass" type="password" placeholder="password" autocomplete="current-password">
+        <div style="height:10px"></div>
+        <div class="row">
+          <button id="btn-login" type="button">로그인</button>
+          <button class="secondary" id="btn-auth-close" type="button">접기</button>
+        </div>
+      </div>
+
       <div class="status" id="auth-status"></div>
     </div>
 
@@ -153,6 +161,9 @@
 
   const authCard = $("auth-card");
   const authStatus = $("auth-status");
+  const authForm = $("auth-form");
+  const authToggleBtn = $("btn-auth-toggle");
+  const authCloseBtn = $("btn-auth-close");
 
   const topicsCard = $("topics-card");
   const topicsTitle = $("topics-title");
@@ -176,6 +187,11 @@
   const articleCache = new Map(); // id -> full article
 
   function setStatus(el, msg){ if(el) el.textContent = msg || ""; }
+  function setAuthExpanded(expanded){
+    if (!authForm || !authToggleBtn) return;
+    authForm.style.display = expanded ? "block" : "none";
+    authToggleBtn.textContent = expanded ? "로그인 닫기" : "로그인 열기";
+  }
 
   async function api(path, init = {}) {
   // ✅ path 정규화: /로 시작하게
@@ -455,6 +471,7 @@
         if(!currentTopic && topics.length>0) currentTopic = topics[0];
         renderTopics(topics);
         loginCard.style.display = "block";
+        setAuthExpanded(false);
         if(currentTopic) await loadArticlesList();
         else {
           hint.style.display="block";
@@ -478,9 +495,15 @@
       articleCache.clear();
       await boot();
     } catch(e){
+      setAuthExpanded(true);
       setStatus(authStatus, "실패: " + e.message);
     }
   };
+
+  authToggleBtn && (authToggleBtn.onclick = () => {
+    setAuthExpanded(authForm.style.display === "none");
+  });
+  authCloseBtn && (authCloseBtn.onclick = () => setAuthExpanded(false));
 
   $("btn-logout").onclick = async () => {
     await api("/api/auth/logout", { method:"POST" });
