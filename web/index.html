@@ -36,6 +36,7 @@
     .article-line { display:flex; align-items:center; justify-content:space-between; gap:12px; }
     .article-title { font-weight:900; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .article-date { color:var(--muted); font-size:12px; flex:0 0 auto; }
+    .article-summary { margin-top:6px; color:var(--muted); font-size:13px; line-height:1.35; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .article-body { margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
     pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:14px;line-height:1.5;color:#dbe7ff}
     /* ===== v0.8 mobile UI polish ===== */
@@ -58,6 +59,7 @@
       .article-line{flex-direction:column;align-items:flex-start}
       .article-title{white-space:normal}
       .article-date{margin-top:6px}
+      .article-summary{white-space:normal}
       .row{gap:8px}
     }
 
@@ -221,6 +223,15 @@
 
 
   function escapeHtml(s){ return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"); }
+  function toOneLineSummary(raw){
+    const s = String(raw || "")
+      .replace(/^#{1,6}\s*/gm, "")
+      .replace(/^\s*[-*]\s+/gm, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!s) return "";
+    return s.length > 160 ? (s.slice(0, 160) + "…") : s;
+  }
 
   function renderTopics(topics){
     topicsEl.innerHTML = "";
@@ -317,12 +328,14 @@
       row.className = "article-row";
 
       const isOpen = (openArticleId !== null) && (Number(openArticleId) === Number(a.id));
+      const summary = toOneLineSummary(a.summary_1line);
 
       row.innerHTML = `
         <div class="article-line">
           <div class="article-title">${escapeHtml(a.headline)}</div>
           <div class="article-date">${escapeHtml(a.created_at || "")}</div>
         </div>
+        <div class="article-summary">${escapeHtml(summary || "요약 준비 중")}</div>
         <div class="article-body" style="display:${isOpen ? "block" : "none"}">
           <div class="muted" style="margin-bottom:8px">
             run: ${escapeHtml(a.run_type)} · period: ${escapeHtml(a.period_start)} ~ ${escapeHtml(a.period_end)} (KST)

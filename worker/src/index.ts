@@ -301,12 +301,131 @@ function pickTag(block: string, tag: string): string | null {
   if (!m) return null;
   return decodeXmlEntities(stripCdata(m[1].trim()));
 }
-type SourceItem = { title: string; url: string; publishedAtKstStr: string; publishedMsKst: number };
+type SourceItem = {
+  title: string;
+  url: string;
+  publishedAtKstStr: string;
+  publishedMsKst: number;
+  sourceName: string;
+  domain: string;
+  credibility: number;
+  snippet?: string;
+};
 
 function parsePubDateToKstMs(pub: string): number {
   const d = new Date(pub);
   const utcMs = isNaN(d.getTime()) ? Date.now() : d.getTime();
   return utcMs + KST_OFFSET_MS; // compare in KST timeline
+}
+
+function stripHtmlToText(html: string): string {
+  return decodeXmlEntities(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+function getDomainFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function scoreSourceCredibility(domain: string, sourceName: string): number {
+  const d = (domain || "").toLowerCase();
+  const s = (sourceName || "").toLowerCase();
+  let score = 0.45;
+
+  if (/reuters|bloomberg|apnews|nytimes|wsj|bbc|ft\.com|economist/.test(d)) score = 0.9;
+  if (/yonhap|khan|hani|joongang|chosun|donga|mk\.co\.kr|hankyung|sedaily|mt\.co\.kr|edaily/.test(d)) score = 0.85;
+  if (/newsis|newspim|etnews|zdnet|theguru/.test(d)) score = Math.max(score, 0.75);
+
+  if (/blog|tistory|velog|brunch|medium|naver\.com\/blog|post\.naver/.test(d)) score = Math.min(score, 0.4);
+  if (/dcinside|instiz|fmkorea|clien|ruliweb|ppomppu|namu\.wiki/.test(d)) score = Math.min(score, 0.35);
+  if (/youtube\.com|youtu\.be|x\.com|twitter\.com/.test(d)) score = Math.min(score, 0.4);
+
+  if (/공식|official/.test(s)) score = Math.max(score, 0.8);
+  return Math.max(0.2, Math.min(0.95, score));
+}
+
+function credibilityLabel(score: number): "high" | "medium" | "low" {
+  if (score >= 0.8) return "high";
+  if (score >= 0.55) return "medium";
+  return "low";
+}
+
+function normalizeText(s: string): string {
+  return (s || "")
+    .toLowerCase()
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenize(s: string): string[] {
+  return normalizeText(s).split(" ").filter(t => t.length >= 2);
+}
+
+function jaccardSimilarity(a: string[], b: string[]): number {
+  const A = new Set(a);
+  const B = new Set(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  const union = A.size + B.size - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+async function fetchArticleSnippet(url: string, timeoutMs = 4500): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      method: "GET",
+      headers: { "user-agent": "royce-site-bot/0.7" },
+      signal: controller.signal,
+    });
+    if (!r.ok) return "";
+    const html = await r.text();
+
+    const pMatches = html.match(/<p\b[^>]*>[\s\S]*?<\/p>/gi) || [];
+    const lines: string[] = [];
+    for (const p of pMatches) {
+      const t = stripHtmlToText(p);
+      if (t.length >= 45) lines.push(t);
+      if (lines.length >= 4) break;
+    }
+    const joined = lines.join(" ").slice(0, 900).trim();
+    return joined;
+  } catch {
+    return "";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function enrichSourcesWithSnippets(sources: SourceItem[], fetchLimit = 6): Promise<SourceItem[]> {
+  const out = [...sources];
+  const targetIdx = out
+    .map((s, i) => ({ i, s }))
+    .filter(x => !x.s.snippet)
+    .sort((a, b) => b.s.credibility - a.s.credibility)
+    .slice(0, fetchLimit)
+    .map(x => x.i);
+
+  await Promise.all(targetIdx.map(async (i) => {
+    const snippet = await fetchArticleSnippet(out[i].url);
+    if (snippet) out[i] = { ...out[i], snippet };
+  }));
+
+  return out;
 }
 
 async function fetchNewsCandidatesByTopicTitle(topicTitle: string, limit = 30): Promise<SourceItem[]> {
@@ -326,13 +445,26 @@ async function fetchNewsCandidatesByTopicTitle(topicTitle: string, limit = 30): 
     const title = pickTag(block, "title") || "";
     const link = pickTag(block, "link") || "";
     const pub = pickTag(block, "pubDate") || "";
+    const desc = stripHtmlToText(pickTag(block, "description") || "");
+    const sourceName = pickTag(block, "source") || "";
     if (!title || !link) continue;
 
     const pubMsKst = pub ? parsePubDateToKstMs(pub) : (Date.now() + KST_OFFSET_MS);
     // pubKstStr: just for DB string (KST)
     const pubKstStr = toKstMysql(new Date(pub ? new Date(pub).getTime() : Date.now()));
+    const domain = getDomainFromUrl(link);
+    const credibility = scoreSourceCredibility(domain, sourceName);
 
-    out.push({ title, url: link, publishedAtKstStr: pubKstStr, publishedMsKst: pubMsKst });
+    out.push({
+      title,
+      url: link,
+      publishedAtKstStr: pubKstStr,
+      publishedMsKst: pubMsKst,
+      sourceName,
+      domain,
+      credibility,
+      snippet: desc || undefined,
+    });
     if (out.length >= limit) break;
   }
 
@@ -353,8 +485,10 @@ async function openaiMakeArticle(
   topicTitle: string,
   windowStartKst: string,
   windowEndKst: string,
-  sources: { title: string }[]
-): Promise<{ headline: string; body_md: string }> {
+  sources: Array<{ title: string; sourceName: string; domain: string; credibility: number; snippet?: string }>,
+  prior?: { headline: string; body_md: string } | null,
+  changeHints: string[] = []
+): Promise<{ headline: string; body_md: string; summary_1line: string }> {
   // v0.4에서 요약 실패가 있어도 v0.6은 “실패하면 fallback”이면 충분(지금 우선순위 낮다 했으니)
   if (!env.OPENAI_API_KEY || !env.OPENAI_MODEL) throw new Error("Missing OPENAI env");
 
@@ -363,16 +497,30 @@ async function openaiMakeArticle(
     `주제: ${topicTitle}`,
     `집계 구간(KST): ${windowStartKst} ~ ${windowEndKst}`,
     ``,
-    `아래 "제목 목록"을 바탕으로, 이 구간의 흐름을 종합한 "기사 1개"를 한국어로 작성해.`,
+    `아래 소스를 바탕으로 이 구간의 흐름을 종합한 기사 1개를 한국어로 작성해.`,
     `요구사항:`,
-    `- 링크/출처 URL을 본문에 쓰지 마라.`,
-    `- 과장/추측 금지. 모르는 건 "불확실"이라고 써라.`,
-    `- 최신 흐름만(이 구간)`,
-    `- 출력은 반드시 JSON만: {"headline":"...","body_md":"..."} `,
-    `- body_md는 마크다운(섹션/불릿 OK)`,
+    `- 신뢰도 high/medium 소스를 우선 반영하고 low는 교차검증된 경우만 반영.`,
+    `- 과장/추측 금지. 근거가 약하면 "불확실"로 표기.`,
+    `- 반드시 최신 흐름과 변화점 중심으로 작성.`,
+    `- body_md는 아래 섹션을 정확히 지켜라:`,
+    `  ## 핵심 3줄`,
+    `  ## 영향`,
+    `  ## 불확실 포인트`,
+    `  ## 내일 볼 포인트`,
+    `- summary_1line은 카드용 1문장(120자 이내)으로 작성`,
+    `- 출력은 반드시 JSON만: {"headline":"...","summary_1line":"...","body_md":"..."} `,
     ``,
-    `제목 목록:`,
-    ...sources.slice(0, 20).map((s, i) => `${i + 1}. ${s.title}`),
+    prior ? `직전 기사 헤드라인: ${prior.headline}` : `직전 기사: 없음`,
+    prior ? `직전 기사 요약(참고): ${prior.body_md.slice(0, 700)}` : "",
+    changeHints.length > 0 ? `이번 구간 변경점 힌트: ${changeHints.join(" | ")}` : `이번 구간 변경점 힌트: 없음`,
+    ``,
+    `소스 목록(신뢰도 라벨 포함):`,
+    ...sources.slice(0, 20).map((s, i) => {
+      const rel = credibilityLabel(s.credibility);
+      const src = s.sourceName || s.domain || "unknown";
+      const snip = s.snippet ? ` | 본문요약: ${s.snippet.slice(0, 220)}` : "";
+      return `${i + 1}. [${rel}] ${src} | 제목: ${s.title}${snip}`;
+    }),
   ].join("\n");
 
   const r = await fetch("https://api.openai.com/v1/responses", {
@@ -395,9 +543,10 @@ async function openaiMakeArticle(
             additionalProperties: false,
             properties: {
               headline: { type: "string" },
+              summary_1line: { type: "string" },
               body_md: { type: "string" },
             },
-            required: ["headline", "body_md"],
+            required: ["headline", "summary_1line", "body_md"],
           },
         },
       },
@@ -445,10 +594,11 @@ async function openaiMakeArticle(
   if (!parsed) throw new Error(`OpenAI returned non-JSON text: ${text.slice(0, 240)}`);
 
   const headline = String(parsed.headline || "").trim();
+  const summary_1line = String(parsed.summary_1line || "").replace(/\s+/g, " ").trim();
   const body_md = String(parsed.body_md || "").trim();
-  if (!headline || !body_md) throw new Error("Invalid OpenAI article json");
+  if (!headline || !summary_1line || !body_md) throw new Error("Invalid OpenAI article json");
 
-  return { headline, body_md };
+  return { headline, summary_1line: summary_1line.slice(0, 160), body_md };
 }
 
 /* ---------------- v0.6 generation pipeline ---------------- */
@@ -477,33 +627,109 @@ async function generateArticleForTopic(env: Env, topic: Topic, runType:"morning"
   const inWindow = candidates.filter(it => it.publishedMsKst >= window.startMsKst && it.publishedMsKst < window.endMsKst);
 
   // 너무 없으면: 구간 밖이라도 최신 몇 개로 fallback
-  const used = inWindow.length >= 5 ? inWindow.slice(0, 20) : candidates.slice(0, 12);
+  const baseUsed = inWindow.length >= 5 ? inWindow.slice(0, 25) : candidates.slice(0, 16);
+  const sortedByReliability = [...baseUsed].sort((a, b) =>
+    b.credibility - a.credibility || b.publishedMsKst - a.publishedMsKst
+  );
+  const filtered = sortedByReliability.filter(s => s.credibility >= 0.35);
+  const used = (filtered.length >= 6 ? filtered : sortedByReliability).slice(0, 20);
+  const enrichedUsed = await enrichSourcesWithSnippets(used, 6);
+
+  // 직전 기사와 유사도 비교 (재탕 방지)
+  let prior: { headline: string; body_md: string } | null = null;
+  try {
+    const latest = await callCafe24(env, "article_latest.php", {
+      method: "POST",
+      body: JSON.stringify({ topic_id: topic.id }),
+    });
+    if (latest.r.ok && latest.data?.article?.headline && latest.data?.article?.body_md) {
+      prior = {
+        headline: String(latest.data.article.headline),
+        body_md: String(latest.data.article.body_md),
+      };
+    }
+  } catch {}
+
+  const previousTokens = new Set(tokenize(`${prior?.headline || ""} ${prior?.body_md || ""}`));
+  const noveltyTitles = enrichedUsed
+    .map(s => s.title)
+    .filter((title) => {
+      const toks = tokenize(title);
+      if (toks.length === 0) return false;
+      const hit = toks.filter(t => previousTokens.has(t)).length;
+      const overlap = hit / toks.length;
+      return overlap < 0.45;
+    })
+    .slice(0, 6);
+
+  const similarity = jaccardSimilarity(
+    tokenize(enrichedUsed.map(s => s.title).join(" ")),
+    tokenize(`${prior?.headline || ""} ${prior?.body_md || ""}`)
+  );
+  const mostlySame = !!prior && similarity >= 0.5 && noveltyTitles.length <= 2;
 
   // 3) 기사 생성 (OpenAI 실패하면 fallback 기사)
-  let article: { headline: string; body_md: string };
+  let article: { headline: string; summary_1line: string; body_md: string };
   try {
-    article = await openaiMakeArticle(
-      env,
-      topic.title,
-      window.startKstStr,
-      window.endKstStr,
-      used.map(u => ({ title: u.title }))
-    );
+    if (mostlySame) {
+      article = {
+        headline: `${topic.title} | 큰 변화 없음 (${runType === "morning" ? "오전" : runType === "evening" ? "오후" : "수동"})`,
+        summary_1line: "직전 기사 대비 큰 변화가 없어 변경점 위주로 확인이 필요한 구간입니다.",
+        body_md: [
+          `## 핵심 3줄`,
+          `- 직전 기사 대비 핵심 흐름의 큰 변화는 제한적입니다.`,
+          `- 반복 이슈가 이어지고 있으며 신규 확인 포인트는 많지 않습니다.`,
+          `- 아래 변경점 후보만 우선 모니터링하면 됩니다.`,
+          ``,
+          `## 영향`,
+          `- 단기적으로는 시장/유저 반응의 방향성이 직전 구간과 유사할 가능성이 큽니다(불확실).`,
+          ``,
+          `## 불확실 포인트`,
+          ...(noveltyTitles.length > 0 ? noveltyTitles.map(t => `- ${t}`) : [`- 신규 확인된 강한 신호가 부족합니다.`]),
+          ``,
+          `## 내일 볼 포인트`,
+          `- 공신력 높은 소스(high/medium)에서 동일 이슈 재확인 여부`,
+          `- 수치/공식 발표 등 확정 정보의 추가 여부`,
+        ].join("\n"),
+      };
+    } else {
+      article = await openaiMakeArticle(
+        env,
+        topic.title,
+        window.startKstStr,
+        window.endKstStr,
+        enrichedUsed.map(u => ({
+          title: u.title,
+          sourceName: u.sourceName,
+          domain: u.domain,
+          credibility: u.credibility,
+          snippet: u.snippet,
+        })),
+        prior,
+        noveltyTitles
+      );
+    }
   } catch (e) {
     console.log("openai summary fallback:", topic.id, topic.title, String(e));
     // fallback: 제목 기반 “브리핑 기사”
-    const bullets = used.slice(0, 10).map(u => `- ${u.title}`).join("\n");
+    const bullets = enrichedUsed.slice(0, 10).map(u => `- ${u.title}`).join("\n");
     article = {
       headline: `${topic.title} | ${runType === "morning" ? "오전" : runType === "evening" ? "오후" : "수동"} 종합`,
+      summary_1line: "요약 생성 오류로 제목/스니펫 기반 임시 브리핑을 제공합니다.",
       body_md: [
-        `## 요약`,
-        `요약 생성이 실패해서 제목 기반 브리핑으로 대체했습니다.`,
+        `## 핵심 3줄`,
+        `- 요약 생성이 실패해 제목/본문 스니펫 기반 브리핑으로 대체했습니다.`,
+        `- 공신력 높은 소스를 우선 반영해 핵심 흐름만 정리했습니다.`,
+        `- 상세 내용은 불확실 포인트 섹션을 참고하세요.`,
         ``,
-        `## 핵심 이슈`,
+        `## 영향`,
+        `- ${topic.title} 관련 이슈는 단기 변동성이 지속될 가능성이 있습니다(불확실).`,
+        ``,
+        `## 불확실 포인트`,
         bullets || "- (수집된 항목이 부족합니다)",
         ``,
-        `## 한 줄`,
-        `이 구간의 핵심 흐름은 "동향 정리 필요" 입니다.`,
+        `## 내일 볼 포인트`,
+        `- high/medium 소스에서 동일 이슈가 반복 확인되는지 점검`,
       ].join("\n"),
     };
   }
@@ -517,14 +743,15 @@ async function generateArticleForTopic(env: Env, topic: Topic, runType:"morning"
       period_start: window.startKstStr,
       period_end: window.endKstStr,
       headline: article.headline,
+      summary_1line: article.summary_1line,
       body_md: article.body_md,
-      sources: used.slice(0, 20).map(u => ({ title: u.title, url: u.url, published_at: u.publishedAtKstStr })),
+      sources: enrichedUsed.slice(0, 20).map(u => ({ title: u.title, url: u.url, published_at: u.publishedAtKstStr })),
     }),
   });
 
   if (!r.ok) throw new Error(`article_upsert failed: ${r.status} ${JSON.stringify(data)}`);
 
-  return { ok:true, topic_id: topic.id, topic: topic.title, runType, used: used.length };
+  return { ok:true, topic_id: topic.id, topic: topic.title, runType, used: enrichedUsed.length };
 }
 
 /* ---------------- API routes ---------------- */
