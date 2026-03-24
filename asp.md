@@ -1,29 +1,17 @@
-<input type="text" id="searchBox" placeholder="검색어 입력">
-
-<select id="mySelect" size="5">
-  <option>Apple</option>
-  <option>Banana</option>
-  <option>Orange</option>
-  <option>Grape</option>
-  <option>Pineapple</option>
+<select id="deptCd" name="deptCd" class="form-control">
+    <option value="">선택하세요</option>
+    @foreach (var item in Model.DeptList)
+    {
+        <option value="@item.Code">@item.Name</option>
+    }
 </select>
 
 <script>
-const searchBox = document.getElementById("searchBox");
-const select = document.getElementById("mySelect");
-const allOptions = Array.from(select.options).map(option => option.text);
-
-searchBox.addEventListener("input", function () {
-  const keyword = this.value.toLowerCase();
-
-  select.innerHTML = "";
-
-  allOptions
-    .filter(text => text.toLowerCase().includes(keyword))
-    .forEach(text => {
-      const option = document.createElement("option");
-      option.text = text;
-      select.add(option);
+    $(function () {
+        $('#deptCd').select2({
+            placeholder: '선택하세요',
+            allowClear: true,
+            width: '100%'
+        });
     });
-});
 </script>
