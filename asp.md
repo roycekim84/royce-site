@@ -1,140 +1,268 @@
-좋아. 그럼 콘솔로그 잔뜩 넣어서, 진짜로 이벤트가 들어오는지부터 확인하는 버전으로 다시 가보자.
+그 요구사항이면 결론이 있어:
 
-핵심부터 말하면,
-기본 <select>는 브라우저마다 키 이벤트가 좀 이상하게 먹을 수 있어서
-$select.on('keydown', ...) 만으로 안 잡히는 경우가 있어.
+진짜 기본 <select> 자체로는
+	•	입력한 텍스트를 박스 안에 보이게 하면서
+	•	검색까지 되는 형태
+를 만들기 어렵다.
 
-그래서 아래처럼 해보자:
-	•	select에 포커스 들어왔는지 추적
-	•	document에서 keydown 받기
-	•	현재 포커스가 그 select일 때만 검색 실행
-	•	콘솔로그로 흐름 전부 확인
+왜냐면 네이티브 select는 입력창이 아니어서 사용자가 친 텍스트를 표시하는 UI를 직접 제어할 수 없거든.
 
-⸻
+그래서 라이브러리 없이 jQuery만 쓴다면, 제일 현실적인 방법은:
 
-1) HTML 예시
+“겉모습은 select 비슷하게 보이는 input + dropdown”을 만들고,
+실제 값 전송은 hidden/select에 동기화 하는 방식이야.
 
-<select id="userId" name="userId" class="form-control">
-    <option value="">선택하세요</option>
-    <option value="1">홍길동</option>
-    <option value="2">김철수</option>
-    <option value="3">이영희</option>
-    <option value="4">박민수</option>
-    <option value="5">최수진</option>
-    <option value="6">김민지</option>
-</select>
+이게 Select2처럼 디자인이 확 바뀌진 않고, 네가 CSS를 최소한으로만 주면 기존 select 느낌 최대한 비슷하게 갈 수 있어.
 
+아래는 jQuery만 사용한 완성형 예시야.
 
 ⸻
 
-2) 콘솔로그 많이 넣은 jQuery 버전
+1) HTML
+
+<div class="searchable-select" id="userSearchBox">
+    <input type="text" id="userSearchInput" class="searchable-select-input" placeholder="선택하세요" autocomplete="off" />
+    <input type="hidden" id="userId" name="userId" />
+
+    <div class="searchable-select-arrow">▼</div>
+
+    <ul class="searchable-select-list" id="userSearchList">
+        <li data-value="1">홍길동</li>
+        <li data-value="2">김철수</li>
+        <li data-value="3">이영희</li>
+        <li data-value="4">박민수</li>
+        <li data-value="5">최수진</li>
+        <li data-value="6">김민지</li>
+        <li data-value="7">오세훈</li>
+    </ul>
+</div>
+
+
+⸻
+
+2) CSS
+
+기존 select 느낌에 최대한 가깝게 아주 무난하게 잡은 버전이야.
+
+.searchable-select {
+    position: relative;
+    width: 280px;
+    font-size: 14px;
+}
+
+.searchable-select-input {
+    width: 100%;
+    height: 34px;
+    padding: 6px 32px 6px 12px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+    outline: none;
+}
+
+.searchable-select-input:focus {
+    border-color: #66afe9;
+}
+
+.searchable-select-arrow {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%);
+    pointer-events: none;
+    font-size: 12px;
+    color: #666;
+}
+
+.searchable-select-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 220px;
+    margin: 2px 0 0 0;
+    padding: 0;
+    list-style: none;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+    overflow-y: auto;
+    display: none;
+    z-index: 9999;
+    box-sizing: border-box;
+}
+
+.searchable-select-list li {
+    padding: 8px 12px;
+    cursor: pointer;
+}
+
+.searchable-select-list li:hover,
+.searchable-select-list li.active {
+    background: #f2f2f2;
+}
+
+
+⸻
+
+3) jQuery
 
 $(function () {
-    var $select = $('#userId');
-    var searchText = '';
-    var searchTimer = null;
-    var resetDelay = 1000;
-    var isFocused = false;
+    var $box = $('#userSearchBox');
+    var $input = $('#userSearchInput');
+    var $list = $('#userSearchList');
+    var $hidden = $('#userId');
+    var $items = $list.find('li');
+    var activeIndex = -1;
 
     console.log('초기화 시작');
-    console.log('select 개수:', $select.length);
+    console.log('item count:', $items.length);
 
-    $select.on('focus', function () {
-        isFocused = true;
-        console.log('[focus] select 포커스 들어옴');
-    });
+    function openList() {
+        console.log('목록 열기');
+        $list.show();
+    }
 
-    $select.on('blur', function () {
-        isFocused = false;
-        searchText = '';
-        clearTimeout(searchTimer);
-        console.log('[blur] select 포커스 빠짐, searchText 초기화');
-    });
+    function closeList() {
+        console.log('목록 닫기');
+        $list.hide();
+        activeIndex = -1;
+        $items.removeClass('active');
+    }
 
-    $select.on('click', function () {
-        console.log('[click] select 클릭됨');
-    });
+    function filterList(keyword) {
+        var text = $.trim(keyword).toLowerCase();
+        var visibleCount = 0;
 
-    $select.on('change', function () {
-        console.log('[change] 선택값 변경됨:', $(this).val(), 'text:', $(this).find('option:selected').text());
-    });
+        console.log('filter keyword:', text);
 
-    $(document).on('keydown', function (e) {
-        console.log('--- keydown 감지 ---');
-        console.log('눌린 키:', e.key);
-        console.log('isFocused:', isFocused);
-        console.log('activeElement id:', document.activeElement ? document.activeElement.id : '(없음)');
-        console.log('activeElement tagName:', document.activeElement ? document.activeElement.tagName : '(없음)');
+        $items.each(function () {
+            var $li = $(this);
+            var itemText = $.trim($li.text()).toLowerCase();
 
-        if (!isFocused) {
-            console.log('select에 포커스가 없어서 종료');
-            return;
-        }
-
-        if (document.activeElement !== $select[0]) {
-            console.log('현재 activeElement가 target select가 아님, 종료');
-            return;
-        }
-
-        if (
-            e.key === 'ArrowUp' ||
-            e.key === 'ArrowDown' ||
-            e.key === 'ArrowLeft' ||
-            e.key === 'ArrowRight' ||
-            e.key === 'Tab' ||
-            e.key === 'Enter' ||
-            e.key === 'Escape'
-        ) {
-            console.log('이동/제어 키라서 기본 동작 유지:', e.key);
-            return;
-        }
-
-        if (e.key === 'Backspace') {
-            searchText = searchText.slice(0, -1);
-            console.log('Backspace 처리 후 searchText:', searchText);
-            e.preventDefault();
-        }
-        else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
-            searchText += e.key.toLowerCase();
-            console.log('문자 입력 누적 후 searchText:', searchText);
-            e.preventDefault();
-        }
-        else {
-            console.log('처리 대상 키가 아니라 종료');
-            return;
-        }
-
-        clearTimeout(searchTimer);
-        searchTimer = setTimeout(function () {
-            console.log('resetDelay 지나서 searchText 초기화. 이전값:', searchText);
-            searchText = '';
-        }, resetDelay);
-
-        if (!searchText) {
-            console.log('searchText 비어있어서 종료');
-            return;
-        }
-
-        var matchedValue = null;
-
-        $select.find('option').each(function (index) {
-            var text = $.trim($(this).text()).toLowerCase();
-            var value = $(this).val();
-
-            console.log('옵션 검사:', index, '| text =', text, '| value =', value);
-
-            if (text.indexOf(searchText) > -1) {
-                matchedValue = value;
-                console.log('매칭 성공:', text, '| value =', value);
-                return false;
+            if (itemText.indexOf(text) > -1) {
+                $li.show();
+                visibleCount++;
+            } else {
+                $li.hide();
             }
         });
 
-        if (matchedValue !== null) {
-            $select.val(matchedValue).trigger('change');
-            console.log('select 값 적용 완료:', matchedValue);
+        console.log('visibleCount:', visibleCount);
+
+        if (visibleCount > 0) {
+            openList();
         } else {
-            console.log('매칭되는 옵션 없음');
+            closeList();
+        }
+    }
+
+    function setActiveVisibleItem(direction) {
+        var $visibleItems = $items.filter(':visible');
+
+        if ($visibleItems.length === 0) {
+            console.log('보이는 항목 없음');
+            return;
+        }
+
+        if (direction === 'down') {
+            activeIndex++;
+            if (activeIndex >= $visibleItems.length) {
+                activeIndex = 0;
+            }
+        } else if (direction === 'up') {
+            activeIndex--;
+            if (activeIndex < 0) {
+                activeIndex = $visibleItems.length - 1;
+            }
+        }
+
+        $items.removeClass('active');
+        var $activeItem = $visibleItems.eq(activeIndex);
+        $activeItem.addClass('active');
+
+        console.log('active item:', $activeItem.text());
+
+        var listEl = $list.get(0);
+        var itemEl = $activeItem.get(0);
+
+        if (listEl && itemEl) {
+            var itemTop = itemEl.offsetTop;
+            var itemBottom = itemTop + itemEl.offsetHeight;
+            var viewTop = listEl.scrollTop;
+            var viewBottom = viewTop + listEl.clientHeight;
+
+            if (itemTop < viewTop) {
+                listEl.scrollTop = itemTop;
+            } else if (itemBottom > viewBottom) {
+                listEl.scrollTop = itemBottom - listEl.clientHeight;
+            }
+        }
+    }
+
+    function selectItem($item) {
+        if (!$item || $item.length === 0) return;
+
+        var value = $item.data('value');
+        var text = $.trim($item.text());
+
+        console.log('선택됨:', value, text);
+
+        $input.val(text);
+        $hidden.val(value).trigger('change');
+        closeList();
+    }
+
+    $input.on('focus click', function () {
+        console.log('input focus/click');
+        filterList($input.val());
+    });
+
+    $input.on('input', function () {
+        console.log('input event:', $(this).val());
+        activeIndex = -1;
+        filterList($(this).val());
+
+        if ($(this).val() === '') {
+            $hidden.val('');
+            console.log('hidden value 초기화');
+        }
+    });
+
+    $input.on('keydown', function (e) {
+        console.log('keydown:', e.key);
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            openList();
+            setActiveVisibleItem('down');
+        }
+        else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            openList();
+            setActiveVisibleItem('up');
+        }
+        else if (e.key === 'Enter') {
+            var $visibleActive = $items.filter(':visible.active');
+            if ($visibleActive.length > 0) {
+                e.preventDefault();
+                selectItem($visibleActive);
+            }
+        }
+        else if (e.key === 'Escape') {
+            closeList();
+        }
+    });
+
+    $items.on('click', function () {
+        console.log('li click:', $(this).text());
+        selectItem($(this));
+    });
+
+    $(document).on('click', function (e) {
+        if (!$(e.target).closest('#userSearchBox').length) {
+            console.log('바깥 클릭');
+            closeList();
         }
     });
 });
@@ -142,125 +270,70 @@ $(function () {
 
 ⸻
 
-3) 이 코드로 뭘 확인해야 하냐
+4) 동작 방식
 
-순서대로 봐:
+이 코드는 이렇게 동작해:
+	•	input 클릭하면 목록 열림
+	•	글자 입력하면 목록 필터링
+	•	클릭해서 선택 가능
+	•	방향키 위/아래 이동 가능
+	•	Enter로 선택 가능
+	•	실제 전송값은 hidden input(name="userId") 에 저장됨
 
-A. 페이지 로드 후
-
-콘솔에 이게 떠야 함
-
-초기화 시작
-select 개수: 1
-
-이게 안 뜨면 스크립트 자체가 실행 안 된 거야.
-
-⸻
-
-B. select 클릭했을 때
-
-이게 떠야 함
-
-[click] select 클릭됨
-[focus] select 포커스 들어옴
-
-이게 안 뜨면 #userId를 잘못 잡고 있거나, 실제 id가 다른 거야.
+즉 서버에는 기존 select처럼 ID 값이 넘어가고, 화면에는 텍스트가 보이는 검색박스가 보여.
 
 ⸻
 
-C. select 클릭 후 키 누르면
+5) DB 데이터로 렌더링하는 Razor 예시
 
-이런 로그가 떠야 함
+서버에서 DB 값 뿌리는 구조면 이렇게 바꾸면 돼:
 
---- keydown 감지 ---
-눌린 키: 김
-isFocused: true
-activeElement id: userId
-activeElement tagName: SELECT
+<div class="searchable-select" id="userSearchBox">
+    <input type="text" id="userSearchInput" class="searchable-select-input" placeholder="선택하세요" autocomplete="off" />
+    <input type="hidden" id="userId" name="userId" value="@Model.UserId" />
 
-여기까지 떠야 검색 로직이 도는 상태야.
+    <div class="searchable-select-arrow">▼</div>
 
-⸻
+    <ul class="searchable-select-list" id="userSearchList">
+        @foreach (var item in Model.UserList)
+        {
+            <li data-value="@item.Value">@item.Text</li>
+        }
+    </ul>
+</div>
 
-4) 왜 이렇게 했냐
-
-네가 말한 것처럼 $select.on('keydown') 안으로 안 들어가는 경우가 있어서,
-아예 document 전체에서 keydown 잡고 현재 포커스가 select인지 확인하는 방식으로 바꾼 거야.
-
-이 방식이 더 잘 잡힌다.
 
 ⸻
 
-5) 그래도 안 들어가면 체크할 것
+6) 수정 포인트
 
-id가 진짜 userId 맞는지
+포함 검색 → 앞글자 검색으로 바꾸기
 
-콘솔에서 직접:
+지금은 포함 검색이야:
 
-$('#userId').length
+if (itemText.indexOf(text) > -1)
 
-결과가 1이어야 함.
+앞에서 시작하는 것만 찾고 싶으면:
 
-⸻
+if (itemText.indexOf(text) === 0)
 
-실제로 select에 포커스가 가는지
-
-콘솔에서:
-
-document.activeElement
-
-select 클릭 후 이게 해당 <select>여야 함.
 
 ⸻
 
-readonly 비슷하게 막혀있는지
+초기 선택값 표시
 
-disabled면 당연히 키 이벤트 안 들어옴.
+수정 화면처럼 이미 값이 있으면, 페이지 로드시 텍스트도 채워줘야 해. 그 버전도 붙일 수 있어.
 
-⸻
-
-iframe 안인지
-
-화면이 iframe 안이면 document가 달라서 이벤트가 바깥에서 안 잡힐 수 있음.
+예를 들면 hidden 값 기준으로 li 찾아서 input 채움.
 
 ⸻
 
-6) 더 단순한 초미니 테스트
+7) 솔직한 결론
 
-이것부터 박아도 돼:
+네 요구사항을 정확히 만족시키려면
+기본 native select 그대로는 어렵고,
+select처럼 보이는 검색 input + dropdown 으로 가야 해.
 
-$(function () {
-    $('#userId').on('focus click change', function (e) {
-        console.log('select 이벤트:', e.type);
-    });
+이게 라이브러리 없이 jQuery만으로 구현하는 가장 자연스러운 방법이야.
 
-    $(document).on('keydown', function (e) {
-        console.log('document keydown:', e.key, '| active:', document.activeElement.tagName, document.activeElement.id);
-    });
-});
-
-이걸로
-	•	select 이벤트는 뜨는지
-	•	document keydown은 뜨는지
-	•	activeElement가 select인지
-
-먼저 보면 돼.
-
-⸻
-
-7) 한글 입력은 좀 변수 있음
-
-한글은 IME 때문에 keydown에서 기대한 글자가 바로 안 들어올 때가 있어.
-영문/숫자로는 잘 되는데 한글이 애매하면, 그건 코드가 틀렸다기보다 브라우저 + 한글 입력기 특성일 수 있어.
-
-그래서 먼저:
-	•	영문 g, k, m
-	•	숫자
-로 테스트해봐.
-
-영문은 되는데 한글이 이상하면 그다음에 한글 대응 버전으로 가면 돼.
-
-⸻
-
-지금은 이 코드 넣고 콘솔에 뭐가 찍히는지만 보면 거의 원인 잡혀.
-특히 초기화 시작 / focus / document keydown 셋 중 어디까지 뜨는지 알려주면 바로 다음 단계로 좁혀줄 수 있어.
+지금 네가 쓰는 실제 DB 바인딩된 select 코드 붙여주면, 그 구조 그대로 내가 바로 변환해서 맞춰줄게.
