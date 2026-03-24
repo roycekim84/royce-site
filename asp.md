@@ -1,154 +1,195 @@
-있어. Select2 안 쓰고, 기존 디자인 최대한 유지하면서 “검색해서 선택” 할 수 있어.
+좋아. 기존 <select> 그대로 두고, jQuery로 타이핑 검색 붙이는 방식으로 가면 돼.
 
-네가 원하는 건 아마 이거지:
-	•	원래 <select> 디자인 유지
-	•	별도 라이브러리 없이
-	•	타이핑해서 항목 찾기
+이 방식은:
+	•	디자인 거의 안 바뀜
+	•	select 그대로 submit 됨
+	•	별도 라이브러리 없음
+	•	select에 포커스 두고 타이핑하면 일치 항목으로 이동
 
-그럼 현실적으로는 “기본 select에 키보드 검색 보강” 또는 “같은 스타일의 가짜 검색 드롭다운 직접 구현” 둘 중 하나야.
+다만 한계도 있어:
+	•	진짜 입력창이 생기는 건 아님
+	•	사용자가 친 글자가 박스에 보이진 않음
+	•	“검색형 콤보박스”처럼 완전한 UX는 아님
 
-제일 가볍고 현실적인 방법
+그래도 기존 select 유지 목적에는 제일 잘 맞아.
 
-1) 기본 <select>에 타이핑 검색 붙이기
+예시 HTML
 
-브라우저 기본 <select>도 첫 글자 점프는 되는데, 그걸 좀 더 똑똑하게 만들 수 있어.
-
-예를 들어:
-	•	select에 포커스
-	•	사용자가 abc 입력
-	•	option 텍스트 중 abc로 시작하거나 포함하는 항목으로 이동
-
-이건 디자인 안 바꾸고 구현 가능해.
-
-예시:
-
-<select id="fruitSelect" name="fruitSelect" class="form-control">
+<select id="userId" name="userId" class="form-control">
     <option value="">선택하세요</option>
-    <option value="1">사과</option>
-    <option value="2">바나나</option>
-    <option value="3">오렌지</option>
-    <option value="4">포도</option>
-    <option value="5">파인애플</option>
+    <option value="1">홍길동</option>
+    <option value="2">김철수</option>
+    <option value="3">이영희</option>
+    <option value="4">박민수</option>
+    <option value="5">최수진</option>
+    <option value="6">김민지</option>
 </select>
 
-<script>
-(function () {
-    const select = document.getElementById('fruitSelect');
-    let keyword = '';
-    let timer = null;
+jQuery 코드
 
-    select.addEventListener('keydown', function (e) {
-        // 특수키는 무시
-        if (e.key.length !== 1 || e.ctrlKey || e.altKey || e.metaKey) {
+$(function () {
+    var $select = $('#userId');
+    var searchText = '';
+    var searchTimer = null;
+    var resetDelay = 800; // 마지막 입력 후 0.8초 지나면 검색어 초기화
+
+    $select.on('keydown', function (e) {
+        // 방향키, 탭, 엔터 등은 기본 동작 유지
+        if (
+            e.key === 'ArrowUp' ||
+            e.key === 'ArrowDown' ||
+            e.key === 'ArrowLeft' ||
+            e.key === 'ArrowRight' ||
+            e.key === 'Tab' ||
+            e.key === 'Enter' ||
+            e.key === 'Escape'
+        ) {
             return;
         }
 
-        keyword += e.key.toLowerCase();
-
-        clearTimeout(timer);
-        timer = setTimeout(function () {
-            keyword = '';
-        }, 700);
-
-        const options = Array.from(select.options);
-
-        const match = options.find(function (opt) {
-            return opt.text.toLowerCase().includes(keyword);
-        });
-
-        if (match) {
-            select.value = match.value;
+        // 백스페이스 처리
+        if (e.key === 'Backspace') {
+            searchText = searchText.slice(0, -1);
             e.preventDefault();
         }
+        // 일반 문자만 누적
+        else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            searchText += e.key.toLowerCase();
+            e.preventDefault();
+        } else {
+            return;
+        }
+
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(function () {
+            searchText = '';
+        }, resetDelay);
+
+        if (!searchText) {
+            return;
+        }
+
+        var matchedValue = null;
+
+        $select.find('option').each(function () {
+            var text = $.trim($(this).text()).toLowerCase();
+
+            // 포함 검색
+            if (text.indexOf(searchText) > -1) {
+                matchedValue = $(this).val();
+                return false; // break
+            }
+        });
+
+        if (matchedValue !== null) {
+            $select.val(matchedValue).trigger('change');
+        }
     });
-})();
-</script>
 
-이 방식 장점:
-	•	디자인 거의 그대로
-	•	라이브러리 없음
-	•	기존 form submit 그대로
+    // select에서 포커스 빠지면 검색어 초기화
+    $select.on('blur', function () {
+        searchText = '';
+        clearTimeout(searchTimer);
+    });
+});
 
-단점:
-	•	입력창이 따로 보이지 않음
-	•	사용자가 “지금 내가 뭘 입력했는지” 시각적으로 잘 안 보임
+동작 방식
 
-⸻
+예를 들어 select에 포커스 두고:
+	•	김 치면 김철수
+	•	이어서 바로 민 치면 김민지
+	•	잠깐 멈췄다가 다시 치면 새 검색 시작
 
-좀 더 제대로 하려면
+“포함 검색” 말고 “앞글자 검색”으로 바꾸고 싶으면
 
-2) input + ul 로 “셀렉트처럼 보이게” 직접 만들기
+이 부분:
 
-이건 디자인을 원래 select처럼 CSS로 맞춰서 구현하는 방법이야.
+if (text.indexOf(searchText) > -1)
 
-즉:
-	•	겉보기는 select 비슷함
-	•	클릭하면 목록 나옴
-	•	입력하면 필터링됨
-	•	선택하면 hidden input에 값 저장
+를 이렇게 바꾸면 돼:
 
-이게 UX는 제일 좋아.
-대신 구현량이 조금 늘어.
+if (text.indexOf(searchText) === 0)
 
-구조는 보통 이렇게 가:
+그러면:
+	•	김 → 김철수, 김민지 같은 앞글자 일치만 찾음
+	•	중간 포함은 안 찾음
 
-<div class="search-select" id="userSearchSelect">
-    <input type="text" id="userSearchInput" placeholder="선택하세요" autocomplete="off" />
-    <input type="hidden" id="userId" name="userId" />
+여러 select에 공통 적용 버전
 
-    <ul id="userSearchList" class="search-select-list">
-        <li data-value="1">홍길동</li>
-        <li data-value="2">김철수</li>
-        <li data-value="3">이영희</li>
-    </ul>
-</div>
+같은 기능을 여러 군데 붙일 거면 이렇게 함수로 빼는 게 편해.
 
-이건 네가 원하면 바로 완성본 만들어줄 수 있어.
+function enableSelectTypeSearch(selector) {
+    $(selector).each(function () {
+        var $select = $(this);
+        var searchText = '';
+        var searchTimer = null;
+        var resetDelay = 800;
 
-장점:
-	•	검색 UX 좋음
-	•	디자인 네가 원하는 대로 맞춤 가능
-	•	Select2처럼 튀는 스타일 없음
+        $select.on('keydown', function (e) {
+            if (
+                e.key === 'ArrowUp' ||
+                e.key === 'ArrowDown' ||
+                e.key === 'ArrowLeft' ||
+                e.key === 'ArrowRight' ||
+                e.key === 'Tab' ||
+                e.key === 'Enter' ||
+                e.key === 'Escape'
+            ) {
+                return;
+            }
 
-단점:
-	•	직접 구현해야 함
-	•	키보드 이동, 닫기 처리 등 손볼 게 있음
+            if (e.key === 'Backspace') {
+                searchText = searchText.slice(0, -1);
+                e.preventDefault();
+            }
+            else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                searchText += e.key.toLowerCase();
+                e.preventDefault();
+            }
+            else {
+                return;
+            }
 
-⸻
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(function () {
+                searchText = '';
+            }, resetDelay);
 
-네 상황에 추천
+            if (!searchText) {
+                return;
+            }
 
-너는 지금 디자인이 달라지는 게 싫은 상태니까, 우선은 이 둘 중 하나 추천:
+            var matchedValue = null;
 
-가볍게 끝내려면
+            $select.find('option').each(function () {
+                var text = $.trim($(this).text()).toLowerCase();
 
-기존 <select> 유지 + 키보드 검색 강화
+                if (text.indexOf(searchText) > -1) {
+                    matchedValue = $(this).val();
+                    return false;
+                }
+            });
 
-UX까지 챙기려면
+            if (matchedValue !== null) {
+                $select.val(matchedValue).trigger('change');
+            }
+        });
 
-커스텀 검색 드롭다운 직접 구현
+        $select.on('blur', function () {
+            searchText = '';
+            clearTimeout(searchTimer);
+        });
+    });
+}
 
-⸻
+$(function () {
+    enableSelectTypeSearch('#userId');
+    // enableSelectTypeSearch('.searchable-select');
+});
 
-“딱 검색해서” 느낌이면 사실 제일 좋은 건
+참고
 
-input 하나에 자동완성 목록 뜨는 방식이야.
-겉모습만 기존 select처럼 꾸미면 돼.
+한글 입력은 브라우저/IME 조합에 따라 keydown에서 애매할 때가 있어서, 한국어 입력 환경에서 아주 빡세게 안정적으로 하려면 composition 계열 이벤트까지 더 다루는 버전이 필요할 수 있어.
+그래도 사내 업무 화면에서 간단히 붙여보는 용도로는 위 코드부터 시작하면 충분히 테스트 가능해.
 
-즉 네가 찾는 건:
-	•	select 확장보다는
-	•	autocomplete dropdown 직접 구현
-
-이쪽이 더 맞아.
-
-⸻
-
-한 줄 결론
-
-응, Select2 안 써도 가능해.
-디자인 유지가 중요하면
-1) 기존 select에 검색 로직만 붙이거나
-2) select처럼 생긴 검색 드롭다운을 직접 만드는 방식이 제일 맞아.
-
-원하면 내가 바로 다음 답변에
-기존 디자인 최대한 비슷한 “검색형 드롭다운” 순수 JS 버전 완성 코드로 줘볼게.
+네 <select> 코드에 맞춰서 id 포함해서 바로 붙일 버전으로 바꿔줄 수도 있어.
