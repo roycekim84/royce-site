@@ -1,126 +1,154 @@
-<select id="deptCd" name="deptCd" class="form-control">
+있어. Select2 안 쓰고, 기존 디자인 최대한 유지하면서 “검색해서 선택” 할 수 있어.
+
+네가 원하는 건 아마 이거지:
+	•	원래 <select> 디자인 유지
+	•	별도 라이브러리 없이
+	•	타이핑해서 항목 찾기
+
+그럼 현실적으로는 “기본 select에 키보드 검색 보강” 또는 “같은 스타일의 가짜 검색 드롭다운 직접 구현” 둘 중 하나야.
+
+제일 가볍고 현실적인 방법
+
+1) 기본 <select>에 타이핑 검색 붙이기
+
+브라우저 기본 <select>도 첫 글자 점프는 되는데, 그걸 좀 더 똑똑하게 만들 수 있어.
+
+예를 들어:
+	•	select에 포커스
+	•	사용자가 abc 입력
+	•	option 텍스트 중 abc로 시작하거나 포함하는 항목으로 이동
+
+이건 디자인 안 바꾸고 구현 가능해.
+
+예시:
+
+<select id="fruitSelect" name="fruitSelect" class="form-control">
     <option value="">선택하세요</option>
-    @foreach (var item in Model.DeptList)
-    {
-        <option value="@item.Code">@item.Name</option>
-    }
+    <option value="1">사과</option>
+    <option value="2">바나나</option>
+    <option value="3">오렌지</option>
+    <option value="4">포도</option>
+    <option value="5">파인애플</option>
 </select>
 
 <script>
-    $(function () {
-        $('#deptCd').select2({
-            placeholder: '선택하세요',
-            allowClear: true,
-            width: '100%'
+(function () {
+    const select = document.getElementById('fruitSelect');
+    let keyword = '';
+    let timer = null;
+
+    select.addEventListener('keydown', function (e) {
+        // 특수키는 무시
+        if (e.key.length !== 1 || e.ctrlKey || e.altKey || e.metaKey) {
+            return;
+        }
+
+        keyword += e.key.toLowerCase();
+
+        clearTimeout(timer);
+        timer = setTimeout(function () {
+            keyword = '';
+        }, 700);
+
+        const options = Array.from(select.options);
+
+        const match = options.find(function (opt) {
+            return opt.text.toLowerCase().includes(keyword);
         });
+
+        if (match) {
+            select.value = match.value;
+            e.preventDefault();
+        }
     });
+})();
 </script>
 
+이 방식 장점:
+	•	디자인 거의 그대로
+	•	라이브러리 없음
+	•	기존 form submit 그대로
 
+단점:
+	•	입력창이 따로 보이지 않음
+	•	사용자가 “지금 내가 뭘 입력했는지” 시각적으로 잘 안 보임
 
-<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+⸻
 
-<script>
-    $(function () {
-        $('#userId').select2({
-            placeholder: '선택하세요',
-            allowClear: true,
-            width: '100%'
-        });
-    });
-</script>
+좀 더 제대로 하려면
 
+2) input + ul 로 “셀렉트처럼 보이게” 직접 만들기
 
+이건 디자인을 원래 select처럼 CSS로 맞춰서 구현하는 방법이야.
 
+즉:
+	•	겉보기는 select 비슷함
+	•	클릭하면 목록 나옴
+	•	입력하면 필터링됨
+	•	선택하면 hidden input에 값 저장
 
-응, 옵션 있어. 그리고 헷갈리기 쉬운 포인트가 하나 있어.
+이게 UX는 제일 좋아.
+대신 구현량이 조금 늘어.
 
-Select2는 “닫힌 상태의 박스에 바로 타이핑”하는 방식이 아니라, 보통 먼저 드롭다운을 열고 그 안의 검색칸에 입력하는 방식이야. 기본 사용 문서도 Select2를 기존 <select> 대체 UI로 설명하고, 검색 관련 문서도 검색창이 드롭다운 내부에 표시되는 흐름으로 설명해.  ￼
+구조는 보통 이렇게 가:
 
-그래서 먼저 이것부터 확인해봐:
+<div class="search-select" id="userSearchSelect">
+    <input type="text" id="userSearchInput" placeholder="선택하세요" autocomplete="off" />
+    <input type="hidden" id="userId" name="userId" />
 
-$('#userId').select2({
-    width: '100%'
-});
+    <ul id="userSearchList" class="search-select-list">
+        <li data-value="1">홍길동</li>
+        <li data-value="2">김철수</li>
+        <li data-value="3">이영희</li>
+    </ul>
+</div>
 
-이 상태에서
-	1.	셀렉트 클릭
-	2.	드롭다운 열림
-	3.	위쪽 검색칸에 타이핑
+이건 네가 원하면 바로 완성본 만들어줄 수 있어.
 
-이게 기본 동작이야.
-만약 검색칸 자체가 안 보이면 minimumResultsForSearch 설정 영향일 수 있어. Select2 공식 문서에 따르면 이 옵션이 검색창 표시 여부를 제어하고, Infinity면 숨겨져.  ￼
+장점:
+	•	검색 UX 좋음
+	•	디자인 네가 원하는 대로 맞춤 가능
+	•	Select2처럼 튀는 스타일 없음
 
-검색창을 확실히 보이게 하려면 이렇게 해:
+단점:
+	•	직접 구현해야 함
+	•	키보드 이동, 닫기 처리 등 손볼 게 있음
 
-$('#userId').select2({
-    width: '100%',
-    minimumResultsForSearch: 0
-});
+⸻
 
-반대로 이런 코드가 있으면 검색창이 숨겨져:
+네 상황에 추천
 
-minimumResultsForSearch: Infinity
+너는 지금 디자인이 달라지는 게 싫은 상태니까, 우선은 이 둘 중 하나 추천:
 
-이건 공식 문서에 나온 숨김 방식이야.  ￼
+가볍게 끝내려면
 
-또 하나는 최소 입력 글자 수 옵션이야.
-minimumInputLength를 넣어두면 그 글자 수 이상 입력해야 검색이 시작돼. 공식 옵션 문서에 있어.  ￼
+기존 <select> 유지 + 키보드 검색 강화
 
-예:
+UX까지 챙기려면
 
-$('#userId').select2({
-    width: '100%',
-    minimumResultsForSearch: 0,
-    minimumInputLength: 1
-});
+커스텀 검색 드롭다운 직접 구현
 
-그런데 네 증상이 “검색칸은 보이는데 커서가 안 들어가고 타이핑이 안 먹는다” 쪽이면, 그건 설정 문제가 아니라 포커스 문제일 가능성이 커. Select2 포럼 쪽에서 jQuery 버전, 모달 안에서 사용, label 안에 select가 들어간 구조 때문에 검색 입력창이 포커스를 잃는 사례가 보고돼 있고, 공식 트러블슈팅도 모달에서는 dropdownParent 설정을 권장해.  ￼
+⸻
 
-그럴 땐 이걸 많이 써:
+“딱 검색해서” 느낌이면 사실 제일 좋은 건
 
-$('#userId').select2({
-    width: '100%'
-});
+input 하나에 자동완성 목록 뜨는 방식이야.
+겉모습만 기존 select처럼 꾸미면 돼.
 
-$(document).on('select2:open', function () {
-    document.querySelector('.select2-container--open .select2-search__field').focus();
-});
+즉 네가 찾는 건:
+	•	select 확장보다는
+	•	autocomplete dropdown 직접 구현
 
-모달 안이면:
+이쪽이 더 맞아.
 
-$('#userId').select2({
-    width: '100%',
-    dropdownParent: $('#myModal')
-});
+⸻
 
-그리고 HTML이 이런 식이면:
+한 줄 결론
 
-<label>
-    사용자
-    <select id="userId">...</select>
-</label>
+응, Select2 안 써도 가능해.
+디자인 유지가 중요하면
+1) 기존 select에 검색 로직만 붙이거나
+2) select처럼 생긴 검색 드롭다운을 직접 만드는 방식이 제일 맞아.
 
-이 구조도 포커스 문제를 만들 수 있어서, 포럼에서는 label 밖으로 select를 빼면 해결된 사례가 있어.  ￼
-
-제일 먼저 체크할 건 딱 4개야.
-	1.	드롭다운 열었을 때 검색칸이 보이는지
-	2.	minimumResultsForSearch: Infinity 같은 게 있는지
-	3.	모달 안에서 쓰는지
-	4.	select가 label 안에 들어가 있는지
-
-제일 무난한 기본형은 이거야:
-
-$('#userId').select2({
-    width: '100%',
-    minimumResultsForSearch: 0
-});
-
-$(document).on('select2:open', function () {
-    const input = document.querySelector('.select2-container--open .select2-search__field');
-    if (input) input.focus();
-});
-
-네 select2() 초기화 코드랑 해당 <select> HTML 한 덩어리 붙여주면 어디가 막히는지 바로 짚어줄 수 있어.
+원하면 내가 바로 다음 답변에
+기존 디자인 최대한 비슷한 “검색형 드롭다운” 순수 JS 버전 완성 코드로 줘볼게.
