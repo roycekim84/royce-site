@@ -1,3 +1,638 @@
+물론.
+아래는 기존 소스를 기준으로, 무엇이 추가됐고 왜 바뀌었는지를 전부 주석으로 달아놓은 버전이야.
+
+핵심 의도는 이거야:
+	•	기존 u-select 기능은 그대로 유지
+	•	select에 u-select-search 클래스가 있을 때만 검색 기능 활성화
+	•	클래스가 없으면 예전처럼 div 토글형 셀렉트 그대로 동작
+
+⸻
+
+
+// ========== 커스텀 셀렉트 (기본형 + 검색형 겸용 버전) ==========
+// 변경 목적:
+// 1) 기존 u-select 동작은 유지
+// 2) 특정 select에 class="u-select-search" 가 있을 때만 검색 가능하도록 확장
+// 3) 기존 공통 로직(render, setByValue, MutationObserver 등)은 최대한 재사용
+
+(function ($) {
+  function closeAll() {
+    // [기존 유지]
+    // 모든 열린 드롭다운 닫기
+    $(".u-select.open").each(function () {
+      var $wrap = $(this);
+      $wrap.removeClass("open").attr("aria-expanded", "false");
+
+      // [기존 유지]
+      // search-wrap 안에서 드롭다운이 열려 있으면 overflow 관련 class를 사용하던 구조 유지
+      var $container = $wrap.closest(".search-wrap");
+      if ($container.length) {
+        if ($container.find(".u-select.open").length === 0) {
+          $container.removeClass("has-open-dropdown");
+        }
+      }
+    });
+  }
+
+  $.fn.upgradeSelectToDropdown = function () {
+    return this.each(function () {
+      var $select = $(this);
+
+      // [기존 유지]
+      // 같은 select에 중복 업그레이드 방지
+      if ($select.data("upgraded")) return;
+      $select.data("upgraded", true);
+
+      // =========================
+      // [추가] 검색형 여부 판별
+      // =========================
+      // 왜 추가?
+      // - 기존 소스는 모든 select를 동일한 "클릭형 div 토글" UI로 바꿨음
+      // - 이제는 일부 select만 검색형으로 쓰고 싶어서
+      //   class="u-select-search" 가 있는 경우만 검색 가능하게 분기
+      var isSearchable = $select.hasClass("u-select-search");
+
+      // =========================
+      // [변경] wrap 생성 방식
+      // =========================
+      // 기존:
+      //   var $wrap = $('<div class="u-select"> ... toggle div + menu div ... </div>');
+      //
+      // 변경 이유:
+      // - 검색형인 경우 toggle이 div가 아니라 input이어야
+      //   사용자가 입력한 텍스트가 보이고 검색 가능함
+      // - 기본형은 예전처럼 div toggle 사용
+      var $wrap = $(
+        '<div class="u-select" role="combobox" aria-expanded="false" style="margin-top: 5px;"></div>'
+      );
+
+      // =========================
+      // [변경] toggle을 조건부 생성
+      // =========================
+      // 기본형: div
+      // 검색형: input
+      //
+      // 왜 변경?
+      // - 기존 div는 텍스트 표시만 가능하고 입력은 불가
+      // - 검색형은 사용자가 직접 타이핑해야 하므로 input 필요
+      var $toggle;
+      if (isSearchable) {
+        $toggle = $('<input type="text" class="u-select-toggle u-select-input" autocomplete="off" />');
+      } else {
+        $toggle = $('<div class="u-select-toggle" tabindex="0"></div>');
+      }
+
+      // [기존 유지]
+      // 드롭다운 목록 컨테이너
+      var $menu = $('<div class="u-menu" role="listbox"></div>');
+
+      // [구조 조립]
+      $wrap.append($toggle).append($menu);
+
+      // =========================
+      // [추가] 선택된 텍스트 캐시
+      // =========================
+      // 왜 추가?
+      // - 검색형 input은 사용자가 타이핑 도중 임시 텍스트가 들어감
+      // - 드롭다운 닫을 때 "최종 선택값의 텍스트"로 복원할 필요가 있음
+      var selectedTextCache = "";
+
+      function render() {
+        // [기존 유지]
+        // 원본 select의 option들을 u-menu 항목으로 렌더링
+        $menu.empty();
+
+        $select.find("option").each(function () {
+          var dis = this.disabled ? ' aria-disabled="true"' : "";
+
+          // =========================
+          // [추가] data-text 속성
+          // =========================
+          // 왜 추가?
+          // - 검색형에서 항목 텍스트를 필터링/복원할 때 편하게 쓰기 위해
+          // - text()를 매번 다시 읽는 대신 data-text에 보관
+          $menu.append(
+            '<div class="u-item" role="option" data-value="' +
+              this.value +
+              '" data-text="' +
+              $('<div>').text($(this).text()).html() +
+              '"' +
+              dis +
+              ">" +
+              $(this).text() +
+              "</div>"
+          );
+        });
+      }
+
+      // [기존 유지]
+      // placeholder 판별 로직
+      // value가 빈 값이거나 data-placeholder가 있으면 placeholder 취급
+      function isPlaceholder($opt) {
+        return $opt.is("[data-placeholder]") || $.trim($opt.val()) === "";
+      }
+
+      // =========================
+      // [추가] 선택 상태 UI 동기화 함수
+      // =========================
+      // 왜 추가?
+      // - 키보드 이동/검색/클릭에서 공통적으로
+      //   현재 선택된 u-item 표시를 갱신해야 해서 분리
+      function syncSelectedState(val) {
+        $menu.find(".u-item").attr("aria-selected", "false");
+        $menu.find('.u-item[data-value="' + val + '"]').attr("aria-selected", "true");
+      }
+
+      // =========================
+      // [추가] toggle 표시 텍스트 설정 함수
+      // =========================
+      // 왜 추가?
+      // - 기본형은 div.text(...)
+      // - 검색형은 input.val(...)
+      // - 타입이 달라서 공통 처리 함수로 분리
+      function setDisplayText(text) {
+        if (isSearchable) {
+          $toggle.val(text);
+        } else {
+          $toggle.text(text);
+        }
+      }
+
+      // =========================
+      // [추가] 현재 표시 텍스트 읽기 함수
+      // =========================
+      // 왜 추가?
+      // - 필요 시 현재 toggle 상태를 공통 방식으로 읽기 위해 추가
+      function getDisplayText() {
+        return isSearchable ? $toggle.val() : $toggle.text();
+      }
+
+      function setByValue(val, fire) {
+        // [기존 유지]
+        // select의 실제 value를 기준으로 option 찾기
+        var $opt = $select.find('option[value="' + val + '"]');
+        if (!$opt.length) $opt = $select.find("option").eq(0);
+
+        // =========================
+        // [변경] toggle 반영 방식을 공통 함수로 통일
+        // =========================
+        // 기존:
+        //   $toggle.text($opt.text());
+        //
+        // 변경 이유:
+        // - 검색형은 input.val(...) 이어야 하므로 setDisplayText 사용
+        selectedTextCache = $.trim($opt.text());
+        setDisplayText(selectedTextCache);
+
+        // =========================
+        // [변경] 선택 항목 표시 로직 분리
+        // =========================
+        syncSelectedState($opt.val());
+
+        // [기존 유지]
+        // placeholder면 selected 스타일 제거
+        if (isPlaceholder($opt)) {
+          $toggle.removeClass("selected");
+        } else {
+          $toggle.addClass("selected");
+        }
+
+        // [기존 유지]
+        // fire=true 이면 실제 원본 select 값 변경 + change 발생
+        if (fire) {
+          $select.val($opt.val()).trigger("change");
+        }
+      }
+
+      function position() {
+        // [기존 유지]
+        // 드롭다운이 열렸을 때 아래/위 공간 계산해서 드롭다운 방향과 높이 조정
+        if (!$wrap.hasClass("open")) return;
+
+        var r = $wrap[0].getBoundingClientRect();
+        var vh = window.innerHeight || document.documentElement.clientHeight;
+        var below = Math.max(0, vh - r.bottom - 8);
+        var above = Math.max(0, r.top - 8);
+
+        var natural = $menu
+          .removeClass("drop-up")
+          .css({ maxHeight: "" })
+          .outerHeight();
+
+        var up = natural > below && above > below;
+        if (up) $menu.addClass("drop-up");
+
+        var avail = up ? above : below;
+        var maxH = Math.max(120, avail);
+
+        $menu.css({
+          maxHeight: maxH,
+          overflowY: natural > maxH ? "auto" : "hidden",
+        });
+      }
+
+      // =========================
+      // [추가] 검색 필터 함수
+      // =========================
+      // 왜 추가?
+      // - 검색형일 때 입력 텍스트 기준으로 메뉴 항목을 필터링하기 위해
+      // - 기본형에서는 사용되지 않음
+      function filterMenu(keyword) {
+        var text = $.trim(keyword).toLowerCase();
+        var visibleCount = 0;
+
+        $menu.find(".u-item").each(function () {
+          var $item = $(this);
+          var itemText = $.trim($item.text()).toLowerCase();
+
+          // 포함 검색
+          if (!text || itemText.indexOf(text) > -1) {
+            $item.show();
+            visibleCount++;
+          } else {
+            $item.hide();
+          }
+        });
+
+        return visibleCount;
+      }
+
+      // =========================
+      // [추가] 검색 필터 초기화 + 선택 텍스트 복원
+      // =========================
+      // 왜 추가?
+      // - 검색형에서 열 때마다 전체 목록을 다시 보여주고
+      //   input에는 현재 선택 텍스트를 보여줘야 하기 때문
+      function resetFilterToSelected() {
+        $menu.find(".u-item").show();
+        setDisplayText(selectedTextCache);
+      }
+
+      function open() {
+        // [기존 유지]
+        // disabled면 열지 않음
+        if ($select.prop("disabled")) return;
+
+        // [기존 유지]
+        // 다른 드롭다운 모두 닫기
+        closeAll();
+
+        // [기존 유지]
+        $wrap.addClass("open").attr("aria-expanded", "true");
+
+        // =========================
+        // [추가] 검색형일 때 열리면 텍스트/필터 복원
+        // =========================
+        // 왜 추가?
+        // - 검색 중이던 임시 텍스트가 남아 있으면 안 됨
+        // - 현재 선택값 기준으로 다시 시작하도록 복원
+        if (isSearchable) {
+          resetFilterToSelected();
+        }
+
+        // [기존 유지]
+        position();
+
+        // [기존 유지]
+        var $container = $wrap.closest(".search-wrap");
+        if ($container.length) $container.addClass("has-open-dropdown");
+
+        // =========================
+        // [추가] 검색형일 때 input 포커스/전체선택
+        // =========================
+        // 왜 추가?
+        // - 열자마자 바로 타이핑해서 검색할 수 있게
+        // - 기존 텍스트를 덮어쓰기 쉽게 select() 처리
+        if (isSearchable) {
+          setTimeout(function () {
+            $toggle.trigger("focus");
+            $toggle.select();
+          }, 0);
+        }
+      }
+
+      function close(restoreText) {
+        // [기존 유지]
+        $wrap.removeClass("open").attr("aria-expanded", "false");
+
+        // =========================
+        // [추가] 검색형이면 닫을 때 선택 텍스트 복원
+        // =========================
+        // 왜 추가?
+        // - 사용자가 중간에 타이핑만 하고 선택 안 한 채 닫았을 수 있음
+        // - 그 경우 최종 선택값 텍스트를 다시 보여줘야 함
+        if (restoreText !== false && isSearchable) {
+          $toggle.val(selectedTextCache);
+        }
+
+        // =========================
+        // [추가] 검색형에서 숨겨진 항목 복원
+        // =========================
+        // 왜 추가?
+        // - 다음에 열 때는 전체 목록에서 다시 시작해야 함
+        $menu.find(".u-item").show();
+
+        // [기존 유지]
+        var $container = $wrap.closest(".search-wrap");
+        if ($container.length) {
+          if ($container.find(".u-select.open").length === 0) {
+            $container.removeClass("has-open-dropdown");
+          }
+        }
+      }
+
+      // =========================
+      // [변경] toggle click 처리
+      // =========================
+      // 기존형과 검색형 모두 클릭 시 열고 닫는 구조는 유지
+      $toggle.on("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        $wrap.hasClass("open") ? close(true) : open();
+      });
+
+      // =========================
+      // [추가] 검색형 전용 focus/input 처리
+      // =========================
+      if (isSearchable) {
+        // input 포커스 시 자동 open
+        // 왜 추가?
+        // - input이므로 클릭이 아니어도 포커스로 열릴 수 있어야 자연스러움
+        $toggle.on("focus", function (e) {
+          e.stopPropagation();
+          if (!$wrap.hasClass("open")) {
+            open();
+          }
+        });
+
+        // input 입력 시 메뉴 필터링
+        // 왜 추가?
+        // - 이게 검색 기능 핵심
+        $toggle.on("input", function () {
+          var keyword = $(this).val();
+          var count = filterMenu(keyword);
+
+          if (!$wrap.hasClass("open")) {
+            open();
+          }
+
+          if (count > 0) {
+            position();
+          }
+        });
+      }
+
+      $toggle.on("keydown", function (e) {
+        var k = e.key;
+
+        // [변경]
+        // 검색형이면 visible 항목 기준으로 동작해야 함
+        // 기본형은 어차피 전부 visible이라 동일하게 동작 가능
+        var $visibleItems = $menu.find(".u-item:visible:not([aria-disabled='true'])");
+        var $current = $visibleItems.filter("[aria-selected='true']").first();
+        var idx = $visibleItems.index($current);
+
+        // [기존 유지]
+        if (k === "Escape") {
+          e.preventDefault();
+          close(true);
+          return;
+        }
+
+        // =========================
+        // [변경] Enter / Space 처리
+        // =========================
+        // 기존:
+        //   기본 토글형에서는 Enter/Space로 열기
+        //
+        // 변경:
+        // - 검색형에서는 Space는 입력 문자여야 하므로 토글 키로 쓰면 안 됨
+        // - 그래서 기본형만 Space 허용
+        if (k === "Enter" || (!isSearchable && k === " ")) {
+          e.preventDefault();
+
+          if (!$wrap.hasClass("open")) {
+            open();
+            return;
+          }
+
+          if ($visibleItems.length) {
+            var $targetEnter = $visibleItems.eq(idx >= 0 ? idx : 0);
+            setByValue($targetEnter.data("value"), true);
+          }
+
+          close(true);
+          return;
+        }
+
+        // [기존 유지 + 검색형 대응]
+        // 위/아래 화살표로 선택 이동
+        if (k === "ArrowDown" || k === "ArrowUp") {
+          e.preventDefault();
+
+          if (!$wrap.hasClass("open")) {
+            open();
+            return;
+          }
+
+          if (!$visibleItems.length) return;
+
+          if (idx < 0) idx = 0;
+          else {
+            idx =
+              k === "ArrowDown"
+                ? Math.min($visibleItems.length - 1, idx + 1)
+                : Math.max(0, idx - 1);
+          }
+
+          var $target = $visibleItems.eq(idx);
+
+          // [기존 유지]
+          syncSelectedState($target.data("value"));
+
+          // =========================
+          // [변경] 텍스트 반영 공통화
+          // =========================
+          // 왜 변경?
+          // - 기본형은 div.text(...)
+          // - 검색형은 input.val(...)
+          setDisplayText($.trim($target.text()));
+
+          // [기존 유지]
+          // 이동한 항목이 보이도록 scroll 조정
+          var menuEl = $menu[0];
+          var itemEl = $target[0];
+          if (menuEl && itemEl) {
+            var itemTop = itemEl.offsetTop;
+            var itemBottom = itemTop + itemEl.offsetHeight;
+            var viewTop = menuEl.scrollTop;
+            var viewBottom = viewTop + menuEl.clientHeight;
+
+            if (itemTop < viewTop) menuEl.scrollTop = itemTop;
+            else if (itemBottom > viewBottom) menuEl.scrollTop = itemBottom - menuEl.clientHeight;
+          }
+        }
+      });
+
+      // [기존 유지]
+      // 메뉴 항목 클릭 선택
+      $menu.on("click", ".u-item", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if ($(this).attr("aria-disabled") === "true") return;
+
+        setByValue($(this).data("value"), true);
+        close(true);
+      });
+
+      // [기존 유지]
+      // 바깥 클릭 시 닫기
+      $(document).on("click", function () {
+        if ($wrap.hasClass("open")) {
+          close(true);
+        }
+      });
+
+      // [기존 유지]
+      $(window).on("resize scroll", position);
+
+      // =========================
+      // [변경] MutationObserver 내부도 검색형/기본형 분기
+      // =========================
+      // 왜 변경?
+      // - 기존은 div toggle 기준 tabindex만 관리했음
+      // - 검색형은 input disabled 처리해야 함
+      var mo = new MutationObserver(function () {
+        render();
+        setByValue($select.val(), false);
+        $wrap.toggleClass("disabled", $select.prop("disabled"));
+
+        if (isSearchable) {
+          $toggle.prop("disabled", $select.prop("disabled"));
+        } else {
+          $toggle.attr("tabindex", $select.prop("disabled") ? -1 : 0);
+        }
+      });
+
+      mo.observe($select[0], {
+        attributes: true,
+        childList: true,
+        subtree: true,
+      });
+
+      // [초기 렌더]
+      render();
+      setByValue($select.val(), false);
+      $wrap.toggleClass("disabled", $select.prop("disabled"));
+
+      // =========================
+      // [변경] 초기 disabled 반영도 분기
+      // =========================
+      if (isSearchable) {
+        $toggle.prop("disabled", $select.prop("disabled"));
+      } else {
+        $toggle.attr("tabindex", $select.prop("disabled") ? -1 : 0);
+      }
+
+      // [기존 유지]
+      // 원본 select의 inline width가 있으면 wrapper에도 적용
+      var inlineWidth = $select[0].style.width;
+      if (inlineWidth) {
+        $wrap.css("width", inlineWidth);
+      }
+
+      // [기존 유지]
+      // 원본 select는 숨기고 값 전송용으로만 유지
+      $select.css({
+        position: "absolute",
+        opacity: 0,
+        width: 0,
+        height: 0,
+        pointerEvents: "none",
+      });
+
+      // [기존 유지]
+      // 원본 select 뒤에 커스텀 UI 삽입
+      $select.after($wrap);
+    });
+  };
+})(jQuery);
+
+
+⸻
+
+그리고 CSS도 왜 필요한지 같이 주석 달아서 적어둘게.
+
+/* =========================
+   검색형일 때 input이 toggle 역할을 하므로
+   width / box-sizing / cursor 보정 필요
+   왜?
+   - 기존 div toggle은 텍스트 박스처럼 보였지만
+   - 이제 검색형은 실제 input 이라서 레이아웃이 틀어질 수 있음
+========================= */
+.u-select-input {
+  width: 100%;
+  box-sizing: border-box;
+  cursor: text;
+}
+
+/* 기존 menu 위치 유지 */
+.u-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+}
+
+/* disabled option 클릭 방지 */
+.u-item[aria-disabled="true"] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+
+⸻
+
+사용법도 같이 주석 형태로 정리하면:
+
+<!-- 기본형: 기존처럼 클릭해서 선택만 가능 -->
+<select class="u-select-target">
+  ...
+</select>
+
+<!-- 검색형: class 추가 시 입력 검색 가능 -->
+<select class="u-select-target u-select-search">
+  ...
+</select>
+
+// 공통 초기화
+$(".u-select-target").upgradeSelectToDropdown();
+
+
+⸻
+
+진짜 변경 포인트만 아주 짧게 요약하면:
+	•	isSearchable 추가
+→ 검색형인지 아닌지 구분하려고
+	•	$toggle를 div/input 분기
+→ 검색형은 입력이 보여야 해서
+	•	selectedTextCache 추가
+→ 검색하다 닫을 때 원래 선택 텍스트 복원하려고
+	•	filterMenu() 추가
+→ 입력값 기준 필터링하려고
+	•	resetFilterToSelected() 추가
+→ 다시 열 때 전체 목록 + 선택 텍스트 복원하려고
+	•	setDisplayText() 추가
+→ div.text / input.val 공통 처리하려고
+	•	input, focus 이벤트 추가
+→ 검색형에서 타이핑 검색 되게 하려고
+	•	Space 키 분기
+→ 검색형에서는 공백 입력이 필요해서
+
+원하면 다음 답변에서 내가 이 코드에 // [추가], // [변경], // [기존 유지] 주석만 더 눈에 띄게 정리한 압축 버전으로 다시 다듬어줄게.
+
+
+
 좋아. 그럼 제일 깔끔하게 이렇게 가면 돼:
 	•	기본 u-select는 지금처럼 그대로 동작
 	•	특정 select에만 예를 들어 u-select-search 클래스를 추가하면
