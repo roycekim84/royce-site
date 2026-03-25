@@ -328,6 +328,69 @@ if (itemText.indexOf(text) === 0)
 
 ⸻
 
+가능해.
+삼각형 ▼ 대신 선 두 개로 만든 아래 화살표(chevron) 쓰면 돼.
+
+예를 들면 HTML은 이렇게 비워두고:
+
+<div class="searchable-select-arrow"></div>
+
+CSS를 이렇게 주면 돼:
+
+.searchable-select-arrow {
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    width: 10px;
+    height: 10px;
+    transform: translateY(-60%);
+    pointer-events: none;
+}
+
+.searchable-select-arrow::before,
+.searchable-select-arrow::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    width: 7px;
+    height: 1.5px;
+    background: #666;
+}
+
+.searchable-select-arrow::before {
+    left: 0;
+    transform: rotate(45deg);
+}
+
+.searchable-select-arrow::after {
+    right: 0;
+    transform: rotate(-45deg);
+}
+
+이렇게 하면 > 같은 선 느낌으로 만든 아래 방향 꺾쇠 화살표가 나와.
+
+더 얇고 깔끔하게 하고 싶으면:
+	•	height: 1px;
+	•	background: #777;
+	•	width: 6px;
+
+이런 식으로 조절하면 되고,
+
+좀 더 또렷하게 하려면:
+	•	height: 2px;
+	•	background: #555;
+
+로 바꾸면 돼.
+
+참고로 지금 방향이 이상하면 rotate 각도만 바꾸면 돼:
+	•	아래 화살표: 45deg, -45deg
+	•	위 화살표: -45deg, 45deg
+
+원하면 내가 네 현재 CSS 기준으로 딱 어울리는 chevron 화살표 스타일 한 버전 더 정리해줄게.
+
+
+
+
 7) 솔직한 결론
 
 네 요구사항을 정확히 만족시키려면
