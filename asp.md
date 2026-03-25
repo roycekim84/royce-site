@@ -1,3 +1,329 @@
+그건 거의 이런 상황이야.
+
+원래 select에 이미 u-select용 뷰가 붙는 구조인데,
+거기에 내가 준 select-new 변환이 한 번 더 별도 UI를 만들어서
+결과적으로
+	•	기존 u-select가 만든 뷰 1개
+	•	select-new-wrap 1개
+
+이렇게 두 개가 같이 보이는 상태야.
+
+즉 문제는 JS 에러가 아니라 중복 렌더링 쪽이야.
+
+왜 그런가
+
+네 말에 나온 u-select가 힌트야. 보통 이런 경우는:
+
+<select class="u-select select-new">
+
+이 select를 기존 프로젝트 CSS/JS가 이미 꾸며서 보여주고 있는데,
+내 코드가 또 숨기고 새 input UI를 만들고 있어서 두 시스템이 동시에 작동하는 거야.
+
+⸻
+
+제일 쉬운 해결
+
+1) u-select를 가진 select는 원본을 확실히 숨기기
+
+아래 CSS를 먼저 넣어봐:
+
+select.select-new {
+    display: none !important;
+}
+
+그리고 wrapper는 보이게:
+
+.select-new-wrap {
+    display: inline-block !important;
+}
+
+근데 이걸로도 해결 안 되면,
+u-select가 select 자체가 아니라 별도 div/span를 생성하는 구조일 가능성이 높아.
+
+⸻
+
+2) 기존 u-select가 만든 뷰를 같이 숨겨야 함
+
+개발자도구로 보면 select 옆에 뭔가 이런 게 붙어 있을 거야:
+	•	.u-select
+	•	.u-select-box
+	•	.u-select-wrap
+	•	.selectric
+	•	.chosen-container
+	•	뭔가 별도 wrapper
+
+즉 DOM이 대충 이렇게 되어 있을 수 있어:
+
+<select class="u-select select-new">...</select>
+<div class="u-select-rendered">...</div>
+<div class="select-new-wrap">...</div>
+
+이러면 select만 숨겨서는 안 되고,
+기존 u-select 렌더링 div도 숨겨야 해.
+
+⸻
+
+바로 넣어볼 수정 JS
+
+내가 준 코드에서 이 부분 추가해봐.
+
+$(function () {
+    $('.select-new').each(function () {
+        var $select = $(this);
+
+        if ($select.data('select-new-applied')) {
+            return;
+        }
+        $select.data('select-new-applied', true);
+
+        // 기존 u-select 류 커스텀 뷰 숨기기 시도
+        $select.hide();
+
+        $select.next('.u-select').hide();
+        $select.next('.u-select-wrap').hide();
+        $select.next('.u-select-box').hide();
+        $select.next('.selectric-wrapper').hide();
+        $select.next('.chosen-container').hide();
+
+        var selectWidth = $select.outerWidth();
+        var placeholder = '';
+        var currentValue = $select.val();
+
+        var $firstOption = $select.find('option').first();
+        if ($firstOption.length && ($firstOption.val() === '' || $firstOption.val() == null)) {
+            placeholder = $.trim($firstOption.text());
+        }
+
+        var $wrap = $('<div class="select-new-wrap"></div>');
+        var $input = $('<input type="text" class="select-new-input" autocomplete="off" />');
+        var $arrow = $('<div class="select-new-arrow"></div>');
+        var $list = $('<ul class="select-new-list"></ul>');
+
+        if (selectWidth) {
+            $wrap.css('max-width', selectWidth + 'px');
+        }
+
+        if (placeholder) {
+            $input.attr('placeholder', placeholder);
+        }
+
+        $select.find('option').each(function () {
+            var $option = $(this);
+            var value = $option.val();
+            var text = $.trim($option.text());
+
+            var $li = $('<li></li>')
+                .attr('data-value', value)
+                .attr('data-text', text)
+                .text(text);
+
+            $list.append($li);
+        });
+
+        $wrap.append($input).append($arrow).append($list);
+        $select.after($wrap);
+
+        var activeIndex = -1;
+
+        function getVisibleItems() {
+            return $list.find('li:visible');
+        }
+
+        function openList() {
+            $list.show();
+        }
+
+        function closeList() {
+            $list.hide();
+            activeIndex = -1;
+            $list.find('li').removeClass('active');
+        }
+
+        function filterList(keyword) {
+            var text = $.trim(keyword).toLowerCase();
+            var visibleCount = 0;
+
+            $list.find('li').each(function () {
+                var $li = $(this);
+                var itemText = ($li.attr('data-text') || '').toLowerCase();
+
+                if (!text || itemText.indexOf(text) > -1) {
+                    $li.show();
+                    visibleCount++;
+                } else {
+                    $li.hide();
+                }
+            });
+
+            if (visibleCount > 0) openList();
+            else closeList();
+        }
+
+        function syncSelect(value, text) {
+            $select.val(value).trigger('change');
+            $input.val(text);
+        }
+
+        function selectItem($item) {
+            if (!$item.length) return;
+            syncSelect($item.attr('data-value'), $item.attr('data-text'));
+            closeList();
+        }
+
+        function setActive(direction) {
+            var $visible = getVisibleItems();
+            if (!$visible.length) return;
+
+            if (direction === 'down') {
+                activeIndex = (activeIndex + 1) % $visible.length;
+            } else {
+                activeIndex = (activeIndex - 1 + $visible.length) % $visible.length;
+            }
+
+            $list.find('li').removeClass('active');
+            $visible.eq(activeIndex).addClass('active');
+        }
+
+        function applyInitialValue() {
+            var $selectedOption = $select.find('option:selected');
+            if ($selectedOption.length && $selectedOption.val()) {
+                $input.val($.trim($selectedOption.text()));
+            }
+        }
+
+        applyInitialValue();
+
+        $input.on('focus click', function () {
+            filterList($input.val());
+        });
+
+        $input.on('input', function () {
+            activeIndex = -1;
+            filterList($(this).val());
+
+            if ($(this).val() === '') {
+                $select.val('').trigger('change');
+            }
+        });
+
+        $input.on('keydown', function (e) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                openList();
+                setActive('down');
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                openList();
+                setActive('up');
+            } else if (e.key === 'Enter') {
+                var $active = $list.find('li.active:visible');
+                if ($active.length) {
+                    e.preventDefault();
+                    selectItem($active);
+                }
+            } else if (e.key === 'Escape') {
+                closeList();
+            }
+        });
+
+        $list.on('click', 'li', function () {
+            selectItem($(this));
+        });
+
+        $(document).on('click.selectNew', function (e) {
+            if (!$(e.target).closest($wrap).length) {
+                closeList();
+            }
+        });
+
+        $select.on('change', function () {
+            var $selectedOption = $select.find('option:selected');
+            if ($selectedOption.length && $selectedOption.val()) {
+                $input.val($.trim($selectedOption.text()));
+            } else {
+                $input.val('');
+            }
+        });
+    });
+});
+
+
+⸻
+
+더 가능성 큰 진짜 원인
+
+네 프로젝트에 이미 이런 코드가 있을 가능성이 높아:
+
+$('.u-select').something();
+
+혹은 공통 스크립트가 페이지 로드 때 select를 꾸며버림.
+
+그러면 네 select가
+
+<select class="u-select select-new">
+
+일 때,
+기존 공통 스크립트가 먼저 먹고,
+그 다음 select-new가 또 먹어서 겹쳐.
+
+이럴 때 제일 깔끔한 해결
+
+u-select는 빼고 select-new만 붙여서 테스트 해봐.
+
+즉:
+
+<select class="select-new">
+
+이걸로 했을 때 하나만 보이면 원인 확정이야.
+
+⸻
+
+추천 방식
+
+방법 A
+
+기존 u-select 쓰는 화면이면
+그 요소에는 select-new를 같이 쓰지 말고,
+아예 별도 클래스로 분리
+
+방법 B
+
+select-new를 적용할 때 기존 u-select 클래스를 제거
+
+예:
+
+$select.removeClass('u-select');
+
+이걸 변환 전에 넣기
+
+⸻
+
+아주 빠른 확인법
+
+개발자도구에서 해당 부분 DOM 보면 아마 이런 식일 거야:
+	•	원래 <select>
+	•	u-select가 만든 wrapper
+	•	select-new-wrap
+
+이 3개 중 2개가 동시에 보일 거다.
+
+⸻
+
+제일 짧은 결론
+
+지금은 select-new 문제라기보다 기존 u-select 커스텀과 충돌하는 거야.
+가장 먼저 해볼 건:
+	1.	class="u-select select-new"면 u-select 빼고 테스트
+	2.	안 되면 select.select-new { display:none !important; }
+	3.	그래도 남으면 기존 u-select가 생성한 wrapper를 숨기기
+
+네 실제 HTML 한 줄, 예를 들면
+
+<select class="u-select select-new form-control" ...>
+
+이런 거랑, 개발자도구에서 생성된 바로 아래 DOM 3~4줄만 주면 내가 정확히 어느 놈을 숨겨야 하는지 바로 찍어줄게.
+
+
 좋아. 그럼 <select class="select-new">를 자동으로 검색형으로 바꾸는 방식으로 깔끔하게 줄게.
 
 이 방식 특징:
