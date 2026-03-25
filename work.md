@@ -1,3 +1,82 @@
+
+가능해.
+제일 간단한 건 span 클릭을 잡아서 그 안의 a 클릭과 같은 동작을 대신 호출하는 거야.
+
+jsGrid 1.5.3은 페이징을 지원하고, pager 쪽은 pagerRenderer로 커스텀도 가능해. 그래서 방법은 둘이야. 빠르게 끝내려면 이벤트 위임, 구조까지 바꾸려면 pagerRenderer.  ￼
+
+가장 쉬운 방법: span 클릭 시 내부 a를 대신 클릭
+
+페이저는 페이지 이동 때 다시 그려질 수 있으니까, 직접 .click() 바인딩 말고 이벤트 위임으로 거는 게 안전해.
+
+$(document).on("click", ".jsgrid-pager .jsgrid-pager-page", function (e) {
+    // a 자체를 클릭한 경우는 기존 동작 그대로 둠
+    if ($(e.target).is("a")) {
+        return;
+    }
+
+    var $link = $(this).find("a").first();
+    if ($link.length) {
+        e.preventDefault();
+        e.stopPropagation();
+        $link[0].click();   // 내부 a 클릭과 같은 효과
+    }
+});
+
+이 방식은 보통 이런 구조일 때 잘 먹어:
+	•	.jsgrid-pager
+	•	.jsgrid-pager-page
+	•	그 안에 <a>
+
+네 DOM이 조금 다르면 셀렉터만 맞추면 돼.
+
+예를 들어 숫자 영역이 이런 구조면:
+
+<span class="jsgrid-pager-page">
+    <a href="#">2</a>
+</span>
+
+위 코드 그대로면 됨.
+
+⸻
+
+click() 대신 jsGrid 메서드로 직접 넘기는 방법
+
+내부 a 클릭에 의존하기 싫으면, span 안 숫자를 읽어서 그 페이지로 직접 이동시키는 방식도 가능해.
+
+$(document).on("click", ".jsgrid-pager .jsgrid-pager-page", function (e) {
+    if ($(e.target).is("a")) {
+        return;
+    }
+
+    var page = parseInt($(this).text(), 10);
+    if (!isNaN(page)) {
+        $("#jsGrid").jsGrid("openPage", page);
+    }
+});
+
+이 방식이 더 깔끔한 편이지만, 네 현재 pager 마크업에서 숫자 텍스트가 정확히 span 안에 들어있는지 봐야 해.
+그리고 jsGrid는 페이징 관련 옵션과 커스텀 pager 구성을 지원하므로 이런 식으로 pager 동작을 붙이는 방향이 자연스럽다.  ￼
+
+⸻
+
+아예 제대로 하려면 pagerRenderer
+
+기본 pager HTML 대신 처음부터 span 전체가 클릭되게 렌더링할 수도 있어. jsGrid는 pagerRenderer 옵션을 제공하고, 이건 커스텀 pager를 만들라고 들어간 옵션이야. 릴리스 노트에도 pagerRenderer가 추가됐다고 나와 있어.  ￼
+
+하지만 네 경우는 이미 동작하는 pager가 있으니까,
+지금은 이벤트 위임 한 줄 추가가 제일 현실적이야.
+
+추천
+
+일단 이걸 먼저 붙여봐:
+
+$(document).on("click", ".jsgrid-pager .jsgrid-pager-page", function (e) {
+    if ($(e.target).is("a")) return;
+    $(this).find("a").first().trigger("click");
+});
+
+이걸로 안 먹으면, 개발자도구에서 pager 숫자 부분 HTML 한 덩어리만 보여주면 셀렉터를 딱 맞춰줄 수 있어.
+
 물론.
 아래는 기존 소스를 기준으로, 무엇이 추가됐고 왜 바뀌었는지를 전부 주석으로 달아놓은 버전이야.
 
