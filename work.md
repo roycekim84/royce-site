@@ -1,1475 +1,195 @@
+그건 보통 라우팅/가상경로/리라이트 규칙 차이 때문이야.
 
-가능해.
-제일 간단한 건 span 클릭을 잡아서 그 안의 a 클릭과 같은 동작을 대신 호출하는 거야.
+네 상황을 풀면 지금 이런 거지:
+	•	주소/a → 상위
+	•	주소/a/a1 → 정상 접근
+	•	주소/a/a2 → 정상 접근
 
-jsGrid 1.5.3은 페이징을 지원하고, pager 쪽은 pagerRenderer로 커스텀도 가능해. 그래서 방법은 둘이야. 빠르게 끝내려면 이벤트 위임, 구조까지 바꾸려면 pagerRenderer.  ￼
+근데
+	•	주소/a1 → 안 됨
+	•	주소/a2 → 됨
 
-가장 쉬운 방법: span 클릭 시 내부 a를 대신 클릭
+즉 a2만 상위 /a 없이도 별도 경로로 매핑돼 있다는 뜻이야.
 
-페이저는 페이지 이동 때 다시 그려질 수 있으니까, 직접 .click() 바인딩 말고 이벤트 위임으로 거는 게 안전해.
+가능성 큰 순서대로 보면:
 
-$(document).on("click", ".jsgrid-pager .jsgrid-pager-page", function (e) {
-    // a 자체를 클릭한 경우는 기존 동작 그대로 둠
-    if ($(e.target).is("a")) {
-        return;
+1) a2가 별도 라우트로 등록돼 있음
+
+예를 들면 라우팅에 이런 게 있을 수 있어:
+
+routes.MapRoute(
+    name: "A2",
+    url: "a2",
+    defaults: new { controller = "A2", action = "Index" }
+);
+
+이러면 /a2 로 직접 들어가짐.
+
+반면 a1은 이런 라우트가 없고 /a/a1만 잡혀 있으면 /a1은 안 돼.
+
+⸻
+
+2) 서버 쪽 리라이트/가상디렉터리 설정이 따로 있음
+
+IIS나 웹서버에서
+	•	/a2 → /a/a2
+이렇게 리라이트해주는 규칙이 있을 수 있어.
+
+예:
+	•	web.config rewrite rules
+	•	IIS virtual application
+	•	reverse proxy 설정
+
+그러면 코드상으론 /a/a2인데 외부에선 /a2도 열림.
+
+⸻
+
+3) 프론트에서 링크/베이스 경로가 다르게 잡힘
+
+특히 화면이 cshtml / js 섞여 있으면
+	•	href="/a2"
+	•	href="/a/a2"
+
+이런 식으로 하드코딩된 경우가 있어.
+
+그래서 실제로는 같은 화면인데 접근 주소가 두 개 생길 수 있음.
+
+⸻
+
+4) a2가 Area/Controller 이름과 우연히 기본 라우트에 걸림
+
+ASP.NET MVC 기본 라우트가 이런 식이잖아:
+
+{controller}/{action}/{id}
+
+그러면 /a2가
+	•	controller = a2
+	•	action = index
+처럼 해석될 수 있어.
+
+반면 a1은 그런 컨트롤러/액션 구조가 안 맞아서 실패할 수 있음.
+
+즉 /a2가 의도치 않게 기본 라우트에 걸려서 열리는 경우도 꽤 흔해.
+
+⸻
+
+네가 바로 확인할 곳
+
+1. RouteConfig.cs
+
+가장 먼저 봐:
+	•	App_Start/RouteConfig.cs
+	•	AreaRegistration
+	•	attribute routing 사용 여부
+
+찾아볼 문자열:
+	•	"a2"
+	•	"a1"
+	•	"a/{something}"
+	•	MapRoute
+
+⸻
+
+2. 컨트롤러 이름
+
+예를 들어
+	•	A2Controller
+가 있으면 /a2가 기본 라우트에 걸릴 수 있어.
+
+특히 액션이 Index()면 더 가능성 큼.
+
+⸻
+
+3. web.config
+
+이거 찾아봐:
+	•	<rewrite>
+	•	<rule>
+	•	a2
+
+만약 /a2를 /a/a2로 보내는 규칙 있으면 원인 확정.
+
+⸻
+
+4. 메뉴/링크 코드
+
+cshtml/js에서
+	•	/a2
+	•	/a/a2
+
+둘 다 쓰는지 검색해봐.
+
+Visual Studio 전체 검색으로:
+
+"/a2"
+"/a/a2"
+"a2"
+
+
+⸻
+
+왜 너는 a2가 안 되게 하고 싶은데 되냐
+
+이건 거의 두 가지 중 하나야:
+	1.	라우트가 중복 등록됨
+	2.	기본 라우트가 우연히 /a2를 받아줌
+
+특히 ASP.NET MVC에서는
+A2Controller 가 있고 Index() 있으면
+/a2가 그냥 열려버리는 경우가 흔해.
+
+⸻
+
+가장 가능성 큰 예시
+
+예를 들어 네가 원한 건:
+	•	/a/a2 만 허용
+
+근데 실제 구조가:
+
+public class A2Controller : Controller
+{
+    public ActionResult Index()
+    {
+        return View();
     }
+}
 
-    var $link = $(this).find("a").first();
-    if ($link.length) {
-        e.preventDefault();
-        e.stopPropagation();
-        $link[0].click();   // 내부 a 클릭과 같은 효과
-    }
-});
+기본 라우트가 살아 있으면
+/a2도 같이 열릴 수 있어.
 
-이 방식은 보통 이런 구조일 때 잘 먹어:
-	•	.jsgrid-pager
-	•	.jsgrid-pager-page
-	•	그 안에 <a>
+왜냐면 MVC가 이걸 그냥
+	•	controller = A2
+	•	action = Index
+로 해석해버리니까.
 
-네 DOM이 조금 다르면 셀렉터만 맞추면 돼.
-
-예를 들어 숫자 영역이 이런 구조면:
-
-<span class="jsgrid-pager-page">
-    <a href="#">2</a>
-</span>
-
-위 코드 그대로면 됨.
+반면 a1은 구조가 다르거나 별도 라우트 안 타서 /a1이 안 되는 거고.
 
 ⸻
 
-click() 대신 jsGrid 메서드로 직접 넘기는 방법
+막으려면
 
-내부 a 클릭에 의존하기 싫으면, span 안 숫자를 읽어서 그 페이지로 직접 이동시키는 방식도 가능해.
+원인에 따라 다르지만 보통은:
+	•	/a2로 잡히는 라우트 제거
+	•	더 구체적인 /a/a2 라우트만 남기기
+	•	기본 라우트보다 앞에 명시 라우트 추가
+	•	컨트롤러 구조/Area 구조 재정리
+	•	rewrite rule 제거
 
-$(document).on("click", ".jsgrid-pager .jsgrid-pager-page", function (e) {
-    if ($(e.target).is("a")) {
-        return;
-    }
-
-    var page = parseInt($(this).text(), 10);
-    if (!isNaN(page)) {
-        $("#jsGrid").jsGrid("openPage", page);
-    }
-});
-
-이 방식이 더 깔끔한 편이지만, 네 현재 pager 마크업에서 숫자 텍스트가 정확히 span 안에 들어있는지 봐야 해.
-그리고 jsGrid는 페이징 관련 옵션과 커스텀 pager 구성을 지원하므로 이런 식으로 pager 동작을 붙이는 방향이 자연스럽다.  ￼
+이쪽으로 가야 해.
 
 ⸻
 
-아예 제대로 하려면 pagerRenderer
+제일 빠른 진단법
 
-기본 pager HTML 대신 처음부터 span 전체가 클릭되게 렌더링할 수도 있어. jsGrid는 pagerRenderer 옵션을 제공하고, 이건 커스텀 pager를 만들라고 들어간 옵션이야. 릴리스 노트에도 pagerRenderer가 추가됐다고 나와 있어.  ￼
-
-하지만 네 경우는 이미 동작하는 pager가 있으니까,
-지금은 이벤트 위임 한 줄 추가가 제일 현실적이야.
-
-추천
-
-일단 이걸 먼저 붙여봐:
-
-$(document).on("click", ".jsgrid-pager .jsgrid-pager-page", function (e) {
-    if ($(e.target).is("a")) return;
-    $(this).find("a").first().trigger("click");
-});
-
-이걸로 안 먹으면, 개발자도구에서 pager 숫자 부분 HTML 한 덩어리만 보여주면 셀렉터를 딱 맞춰줄 수 있어.
-
-물론.
-아래는 기존 소스를 기준으로, 무엇이 추가됐고 왜 바뀌었는지를 전부 주석으로 달아놓은 버전이야.
-
-핵심 의도는 이거야:
-	•	기존 u-select 기능은 그대로 유지
-	•	select에 u-select-search 클래스가 있을 때만 검색 기능 활성화
-	•	클래스가 없으면 예전처럼 div 토글형 셀렉트 그대로 동작
+이 3개만 보면 거의 답 나와:
+	•	RouteConfig.cs
+	•	A2Controller 존재 여부
+	•	web.config rewrite
 
 ⸻
 
+한 줄로 말하면:
+/a2가 되는 건 a2가 별도 라우트나 기본 라우트에 잡혀 있기 때문이고, /a1이 안 되는 건 그 매핑이 없어서야.
 
-// ========== 커스텀 셀렉트 (기본형 + 검색형 겸용 버전) ==========
-// 변경 목적:
-// 1) 기존 u-select 동작은 유지
-// 2) 특정 select에 class="u-select-search" 가 있을 때만 검색 가능하도록 확장
-// 3) 기존 공통 로직(render, setByValue, MutationObserver 등)은 최대한 재사용
-
-(function ($) {
-  function closeAll() {
-    // [기존 유지]
-    // 모든 열린 드롭다운 닫기
-    $(".u-select.open").each(function () {
-      var $wrap = $(this);
-      $wrap.removeClass("open").attr("aria-expanded", "false");
-
-      // [기존 유지]
-      // search-wrap 안에서 드롭다운이 열려 있으면 overflow 관련 class를 사용하던 구조 유지
-      var $container = $wrap.closest(".search-wrap");
-      if ($container.length) {
-        if ($container.find(".u-select.open").length === 0) {
-          $container.removeClass("has-open-dropdown");
-        }
-      }
-    });
-  }
-
-  $.fn.upgradeSelectToDropdown = function () {
-    return this.each(function () {
-      var $select = $(this);
-
-      // [기존 유지]
-      // 같은 select에 중복 업그레이드 방지
-      if ($select.data("upgraded")) return;
-      $select.data("upgraded", true);
-
-      // =========================
-      // [추가] 검색형 여부 판별
-      // =========================
-      // 왜 추가?
-      // - 기존 소스는 모든 select를 동일한 "클릭형 div 토글" UI로 바꿨음
-      // - 이제는 일부 select만 검색형으로 쓰고 싶어서
-      //   class="u-select-search" 가 있는 경우만 검색 가능하게 분기
-      var isSearchable = $select.hasClass("u-select-search");
-
-      // =========================
-      // [변경] wrap 생성 방식
-      // =========================
-      // 기존:
-      //   var $wrap = $('<div class="u-select"> ... toggle div + menu div ... </div>');
-      //
-      // 변경 이유:
-      // - 검색형인 경우 toggle이 div가 아니라 input이어야
-      //   사용자가 입력한 텍스트가 보이고 검색 가능함
-      // - 기본형은 예전처럼 div toggle 사용
-      var $wrap = $(
-        '<div class="u-select" role="combobox" aria-expanded="false" style="margin-top: 5px;"></div>'
-      );
-
-      // =========================
-      // [변경] toggle을 조건부 생성
-      // =========================
-      // 기본형: div
-      // 검색형: input
-      //
-      // 왜 변경?
-      // - 기존 div는 텍스트 표시만 가능하고 입력은 불가
-      // - 검색형은 사용자가 직접 타이핑해야 하므로 input 필요
-      var $toggle;
-      if (isSearchable) {
-        $toggle = $('<input type="text" class="u-select-toggle u-select-input" autocomplete="off" />');
-      } else {
-        $toggle = $('<div class="u-select-toggle" tabindex="0"></div>');
-      }
-
-      // [기존 유지]
-      // 드롭다운 목록 컨테이너
-      var $menu = $('<div class="u-menu" role="listbox"></div>');
-
-      // [구조 조립]
-      $wrap.append($toggle).append($menu);
-
-      // =========================
-      // [추가] 선택된 텍스트 캐시
-      // =========================
-      // 왜 추가?
-      // - 검색형 input은 사용자가 타이핑 도중 임시 텍스트가 들어감
-      // - 드롭다운 닫을 때 "최종 선택값의 텍스트"로 복원할 필요가 있음
-      var selectedTextCache = "";
-
-      function render() {
-        // [기존 유지]
-        // 원본 select의 option들을 u-menu 항목으로 렌더링
-        $menu.empty();
-
-        $select.find("option").each(function () {
-          var dis = this.disabled ? ' aria-disabled="true"' : "";
-
-          // =========================
-          // [추가] data-text 속성
-          // =========================
-          // 왜 추가?
-          // - 검색형에서 항목 텍스트를 필터링/복원할 때 편하게 쓰기 위해
-          // - text()를 매번 다시 읽는 대신 data-text에 보관
-          $menu.append(
-            '<div class="u-item" role="option" data-value="' +
-              this.value +
-              '" data-text="' +
-              $('<div>').text($(this).text()).html() +
-              '"' +
-              dis +
-              ">" +
-              $(this).text() +
-              "</div>"
-          );
-        });
-      }
-
-      // [기존 유지]
-      // placeholder 판별 로직
-      // value가 빈 값이거나 data-placeholder가 있으면 placeholder 취급
-      function isPlaceholder($opt) {
-        return $opt.is("[data-placeholder]") || $.trim($opt.val()) === "";
-      }
-
-      // =========================
-      // [추가] 선택 상태 UI 동기화 함수
-      // =========================
-      // 왜 추가?
-      // - 키보드 이동/검색/클릭에서 공통적으로
-      //   현재 선택된 u-item 표시를 갱신해야 해서 분리
-      function syncSelectedState(val) {
-        $menu.find(".u-item").attr("aria-selected", "false");
-        $menu.find('.u-item[data-value="' + val + '"]').attr("aria-selected", "true");
-      }
-
-      // =========================
-      // [추가] toggle 표시 텍스트 설정 함수
-      // =========================
-      // 왜 추가?
-      // - 기본형은 div.text(...)
-      // - 검색형은 input.val(...)
-      // - 타입이 달라서 공통 처리 함수로 분리
-      function setDisplayText(text) {
-        if (isSearchable) {
-          $toggle.val(text);
-        } else {
-          $toggle.text(text);
-        }
-      }
-
-      // =========================
-      // [추가] 현재 표시 텍스트 읽기 함수
-      // =========================
-      // 왜 추가?
-      // - 필요 시 현재 toggle 상태를 공통 방식으로 읽기 위해 추가
-      function getDisplayText() {
-        return isSearchable ? $toggle.val() : $toggle.text();
-      }
-
-      function setByValue(val, fire) {
-        // [기존 유지]
-        // select의 실제 value를 기준으로 option 찾기
-        var $opt = $select.find('option[value="' + val + '"]');
-        if (!$opt.length) $opt = $select.find("option").eq(0);
-
-        // =========================
-        // [변경] toggle 반영 방식을 공통 함수로 통일
-        // =========================
-        // 기존:
-        //   $toggle.text($opt.text());
-        //
-        // 변경 이유:
-        // - 검색형은 input.val(...) 이어야 하므로 setDisplayText 사용
-        selectedTextCache = $.trim($opt.text());
-        setDisplayText(selectedTextCache);
-
-        // =========================
-        // [변경] 선택 항목 표시 로직 분리
-        // =========================
-        syncSelectedState($opt.val());
-
-        // [기존 유지]
-        // placeholder면 selected 스타일 제거
-        if (isPlaceholder($opt)) {
-          $toggle.removeClass("selected");
-        } else {
-          $toggle.addClass("selected");
-        }
-
-        // [기존 유지]
-        // fire=true 이면 실제 원본 select 값 변경 + change 발생
-        if (fire) {
-          $select.val($opt.val()).trigger("change");
-        }
-      }
-
-      function position() {
-        // [기존 유지]
-        // 드롭다운이 열렸을 때 아래/위 공간 계산해서 드롭다운 방향과 높이 조정
-        if (!$wrap.hasClass("open")) return;
-
-        var r = $wrap[0].getBoundingClientRect();
-        var vh = window.innerHeight || document.documentElement.clientHeight;
-        var below = Math.max(0, vh - r.bottom - 8);
-        var above = Math.max(0, r.top - 8);
-
-        var natural = $menu
-          .removeClass("drop-up")
-          .css({ maxHeight: "" })
-          .outerHeight();
-
-        var up = natural > below && above > below;
-        if (up) $menu.addClass("drop-up");
-
-        var avail = up ? above : below;
-        var maxH = Math.max(120, avail);
-
-        $menu.css({
-          maxHeight: maxH,
-          overflowY: natural > maxH ? "auto" : "hidden",
-        });
-      }
-
-      // =========================
-      // [추가] 검색 필터 함수
-      // =========================
-      // 왜 추가?
-      // - 검색형일 때 입력 텍스트 기준으로 메뉴 항목을 필터링하기 위해
-      // - 기본형에서는 사용되지 않음
-      function filterMenu(keyword) {
-        var text = $.trim(keyword).toLowerCase();
-        var visibleCount = 0;
-
-        $menu.find(".u-item").each(function () {
-          var $item = $(this);
-          var itemText = $.trim($item.text()).toLowerCase();
-
-          // 포함 검색
-          if (!text || itemText.indexOf(text) > -1) {
-            $item.show();
-            visibleCount++;
-          } else {
-            $item.hide();
-          }
-        });
-
-        return visibleCount;
-      }
-
-      // =========================
-      // [추가] 검색 필터 초기화 + 선택 텍스트 복원
-      // =========================
-      // 왜 추가?
-      // - 검색형에서 열 때마다 전체 목록을 다시 보여주고
-      //   input에는 현재 선택 텍스트를 보여줘야 하기 때문
-      function resetFilterToSelected() {
-        $menu.find(".u-item").show();
-        setDisplayText(selectedTextCache);
-      }
-
-      function open() {
-        // [기존 유지]
-        // disabled면 열지 않음
-        if ($select.prop("disabled")) return;
-
-        // [기존 유지]
-        // 다른 드롭다운 모두 닫기
-        closeAll();
-
-        // [기존 유지]
-        $wrap.addClass("open").attr("aria-expanded", "true");
-
-        // =========================
-        // [추가] 검색형일 때 열리면 텍스트/필터 복원
-        // =========================
-        // 왜 추가?
-        // - 검색 중이던 임시 텍스트가 남아 있으면 안 됨
-        // - 현재 선택값 기준으로 다시 시작하도록 복원
-        if (isSearchable) {
-          resetFilterToSelected();
-        }
-
-        // [기존 유지]
-        position();
-
-        // [기존 유지]
-        var $container = $wrap.closest(".search-wrap");
-        if ($container.length) $container.addClass("has-open-dropdown");
-
-        // =========================
-        // [추가] 검색형일 때 input 포커스/전체선택
-        // =========================
-        // 왜 추가?
-        // - 열자마자 바로 타이핑해서 검색할 수 있게
-        // - 기존 텍스트를 덮어쓰기 쉽게 select() 처리
-        if (isSearchable) {
-          setTimeout(function () {
-            $toggle.trigger("focus");
-            $toggle.select();
-          }, 0);
-        }
-      }
-
-      function close(restoreText) {
-        // [기존 유지]
-        $wrap.removeClass("open").attr("aria-expanded", "false");
-
-        // =========================
-        // [추가] 검색형이면 닫을 때 선택 텍스트 복원
-        // =========================
-        // 왜 추가?
-        // - 사용자가 중간에 타이핑만 하고 선택 안 한 채 닫았을 수 있음
-        // - 그 경우 최종 선택값 텍스트를 다시 보여줘야 함
-        if (restoreText !== false && isSearchable) {
-          $toggle.val(selectedTextCache);
-        }
-
-        // =========================
-        // [추가] 검색형에서 숨겨진 항목 복원
-        // =========================
-        // 왜 추가?
-        // - 다음에 열 때는 전체 목록에서 다시 시작해야 함
-        $menu.find(".u-item").show();
-
-        // [기존 유지]
-        var $container = $wrap.closest(".search-wrap");
-        if ($container.length) {
-          if ($container.find(".u-select.open").length === 0) {
-            $container.removeClass("has-open-dropdown");
-          }
-        }
-      }
-
-      // =========================
-      // [변경] toggle click 처리
-      // =========================
-      // 기존형과 검색형 모두 클릭 시 열고 닫는 구조는 유지
-      $toggle.on("click", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        $wrap.hasClass("open") ? close(true) : open();
-      });
-
-      // =========================
-      // [추가] 검색형 전용 focus/input 처리
-      // =========================
-      if (isSearchable) {
-        // input 포커스 시 자동 open
-        // 왜 추가?
-        // - input이므로 클릭이 아니어도 포커스로 열릴 수 있어야 자연스러움
-        $toggle.on("focus", function (e) {
-          e.stopPropagation();
-          if (!$wrap.hasClass("open")) {
-            open();
-          }
-        });
-
-        // input 입력 시 메뉴 필터링
-        // 왜 추가?
-        // - 이게 검색 기능 핵심
-        $toggle.on("input", function () {
-          var keyword = $(this).val();
-          var count = filterMenu(keyword);
-
-          if (!$wrap.hasClass("open")) {
-            open();
-          }
-
-          if (count > 0) {
-            position();
-          }
-        });
-      }
-
-      $toggle.on("keydown", function (e) {
-        var k = e.key;
-
-        // [변경]
-        // 검색형이면 visible 항목 기준으로 동작해야 함
-        // 기본형은 어차피 전부 visible이라 동일하게 동작 가능
-        var $visibleItems = $menu.find(".u-item:visible:not([aria-disabled='true'])");
-        var $current = $visibleItems.filter("[aria-selected='true']").first();
-        var idx = $visibleItems.index($current);
-
-        // [기존 유지]
-        if (k === "Escape") {
-          e.preventDefault();
-          close(true);
-          return;
-        }
-
-        // =========================
-        // [변경] Enter / Space 처리
-        // =========================
-        // 기존:
-        //   기본 토글형에서는 Enter/Space로 열기
-        //
-        // 변경:
-        // - 검색형에서는 Space는 입력 문자여야 하므로 토글 키로 쓰면 안 됨
-        // - 그래서 기본형만 Space 허용
-        if (k === "Enter" || (!isSearchable && k === " ")) {
-          e.preventDefault();
-
-          if (!$wrap.hasClass("open")) {
-            open();
-            return;
-          }
-
-          if ($visibleItems.length) {
-            var $targetEnter = $visibleItems.eq(idx >= 0 ? idx : 0);
-            setByValue($targetEnter.data("value"), true);
-          }
-
-          close(true);
-          return;
-        }
-
-        // [기존 유지 + 검색형 대응]
-        // 위/아래 화살표로 선택 이동
-        if (k === "ArrowDown" || k === "ArrowUp") {
-          e.preventDefault();
-
-          if (!$wrap.hasClass("open")) {
-            open();
-            return;
-          }
-
-          if (!$visibleItems.length) return;
-
-          if (idx < 0) idx = 0;
-          else {
-            idx =
-              k === "ArrowDown"
-                ? Math.min($visibleItems.length - 1, idx + 1)
-                : Math.max(0, idx - 1);
-          }
-
-          var $target = $visibleItems.eq(idx);
-
-          // [기존 유지]
-          syncSelectedState($target.data("value"));
-
-          // =========================
-          // [변경] 텍스트 반영 공통화
-          // =========================
-          // 왜 변경?
-          // - 기본형은 div.text(...)
-          // - 검색형은 input.val(...)
-          setDisplayText($.trim($target.text()));
-
-          // [기존 유지]
-          // 이동한 항목이 보이도록 scroll 조정
-          var menuEl = $menu[0];
-          var itemEl = $target[0];
-          if (menuEl && itemEl) {
-            var itemTop = itemEl.offsetTop;
-            var itemBottom = itemTop + itemEl.offsetHeight;
-            var viewTop = menuEl.scrollTop;
-            var viewBottom = viewTop + menuEl.clientHeight;
-
-            if (itemTop < viewTop) menuEl.scrollTop = itemTop;
-            else if (itemBottom > viewBottom) menuEl.scrollTop = itemBottom - menuEl.clientHeight;
-          }
-        }
-      });
-
-      // [기존 유지]
-      // 메뉴 항목 클릭 선택
-      $menu.on("click", ".u-item", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        if ($(this).attr("aria-disabled") === "true") return;
-
-        setByValue($(this).data("value"), true);
-        close(true);
-      });
-
-      // [기존 유지]
-      // 바깥 클릭 시 닫기
-      $(document).on("click", function () {
-        if ($wrap.hasClass("open")) {
-          close(true);
-        }
-      });
-
-      // [기존 유지]
-      $(window).on("resize scroll", position);
-
-      // =========================
-      // [변경] MutationObserver 내부도 검색형/기본형 분기
-      // =========================
-      // 왜 변경?
-      // - 기존은 div toggle 기준 tabindex만 관리했음
-      // - 검색형은 input disabled 처리해야 함
-      var mo = new MutationObserver(function () {
-        render();
-        setByValue($select.val(), false);
-        $wrap.toggleClass("disabled", $select.prop("disabled"));
-
-        if (isSearchable) {
-          $toggle.prop("disabled", $select.prop("disabled"));
-        } else {
-          $toggle.attr("tabindex", $select.prop("disabled") ? -1 : 0);
-        }
-      });
-
-      mo.observe($select[0], {
-        attributes: true,
-        childList: true,
-        subtree: true,
-      });
-
-      // [초기 렌더]
-      render();
-      setByValue($select.val(), false);
-      $wrap.toggleClass("disabled", $select.prop("disabled"));
-
-      // =========================
-      // [변경] 초기 disabled 반영도 분기
-      // =========================
-      if (isSearchable) {
-        $toggle.prop("disabled", $select.prop("disabled"));
-      } else {
-        $toggle.attr("tabindex", $select.prop("disabled") ? -1 : 0);
-      }
-
-      // [기존 유지]
-      // 원본 select의 inline width가 있으면 wrapper에도 적용
-      var inlineWidth = $select[0].style.width;
-      if (inlineWidth) {
-        $wrap.css("width", inlineWidth);
-      }
-
-      // [기존 유지]
-      // 원본 select는 숨기고 값 전송용으로만 유지
-      $select.css({
-        position: "absolute",
-        opacity: 0,
-        width: 0,
-        height: 0,
-        pointerEvents: "none",
-      });
-
-      // [기존 유지]
-      // 원본 select 뒤에 커스텀 UI 삽입
-      $select.after($wrap);
-    });
-  };
-})(jQuery);
-
-
-⸻
-
-그리고 CSS도 왜 필요한지 같이 주석 달아서 적어둘게.
-
-/* =========================
-   검색형일 때 input이 toggle 역할을 하므로
-   width / box-sizing / cursor 보정 필요
-   왜?
-   - 기존 div toggle은 텍스트 박스처럼 보였지만
-   - 이제 검색형은 실제 input 이라서 레이아웃이 틀어질 수 있음
-========================= */
-.u-select-input {
-  width: 100%;
-  box-sizing: border-box;
-  cursor: text;
-}
-
-/* 기존 menu 위치 유지 */
-.u-menu {
-  position: absolute;
-  left: 0;
-  right: 0;
-  z-index: 9999;
-}
-
-/* disabled option 클릭 방지 */
-.u-item[aria-disabled="true"] {
-  opacity: 0.5;
-  pointer-events: none;
-}
-
-
-⸻
-
-사용법도 같이 주석 형태로 정리하면:
-
-<!-- 기본형: 기존처럼 클릭해서 선택만 가능 -->
-<select class="u-select-target">
-  ...
-</select>
-
-<!-- 검색형: class 추가 시 입력 검색 가능 -->
-<select class="u-select-target u-select-search">
-  ...
-</select>
-
-// 공통 초기화
-$(".u-select-target").upgradeSelectToDropdown();
-
-
-⸻
-
-진짜 변경 포인트만 아주 짧게 요약하면:
-	•	isSearchable 추가
-→ 검색형인지 아닌지 구분하려고
-	•	$toggle를 div/input 분기
-→ 검색형은 입력이 보여야 해서
-	•	selectedTextCache 추가
-→ 검색하다 닫을 때 원래 선택 텍스트 복원하려고
-	•	filterMenu() 추가
-→ 입력값 기준 필터링하려고
-	•	resetFilterToSelected() 추가
-→ 다시 열 때 전체 목록 + 선택 텍스트 복원하려고
-	•	setDisplayText() 추가
-→ div.text / input.val 공통 처리하려고
-	•	input, focus 이벤트 추가
-→ 검색형에서 타이핑 검색 되게 하려고
-	•	Space 키 분기
-→ 검색형에서는 공백 입력이 필요해서
-
-원하면 다음 답변에서 내가 이 코드에 // [추가], // [변경], // [기존 유지] 주석만 더 눈에 띄게 정리한 압축 버전으로 다시 다듬어줄게.
-
-
-
-좋아. 그럼 제일 깔끔하게 이렇게 가면 돼:
-	•	기본 u-select는 지금처럼 그대로 동작
-	•	특정 select에만 예를 들어 u-select-search 클래스를 추가하면
-	•	그때만 input 검색 가능
-	•	클래스 없으면
-	•	기존 div toggle 방식 유지
-
-즉 사용법은 이렇게:
-
-<select class="u-select-target">
-
-기본형
-
-<select class="u-select-target u-select-search">
-
-검색형
-
-이 방식으로 만들면 돼.
-
-아래는 기존 코드 최대한 유지하면서,
-u-select-search 클래스가 있을 때만 검색형 input 으로 바뀌는 버전이야.
-
-// ========== 커스텀 셀렉트 (기본/검색형 겸용) ==========
-(function ($) {
-  function closeAll() {
-    $(".u-select.open").each(function () {
-      var $wrap = $(this);
-      $wrap.removeClass("open").attr("aria-expanded", "false");
-
-      var $container = $wrap.closest(".search-wrap");
-      if ($container.length) {
-        if ($container.find(".u-select.open").length === 0) {
-          $container.removeClass("has-open-dropdown");
-        }
-      }
-    });
-  }
-
-  $.fn.upgradeSelectToDropdown = function () {
-    return this.each(function () {
-      var $select = $(this);
-      if ($select.data("upgraded")) return;
-      $select.data("upgraded", true);
-
-      var isSearchable = $select.hasClass("u-select-search");
-
-      var $wrap = $(
-        '<div class="u-select" role="combobox" aria-expanded="false" style="margin-top: 5px;"></div>'
-      );
-
-      var $toggle;
-      if (isSearchable) {
-        $toggle = $('<input type="text" class="u-select-toggle u-select-input" autocomplete="off" />');
-      } else {
-        $toggle = $('<div class="u-select-toggle" tabindex="0"></div>');
-      }
-
-      var $menu = $('<div class="u-menu" role="listbox"></div>');
-
-      $wrap.append($toggle).append($menu);
-
-      var selectedTextCache = "";
-
-      function render() {
-        $menu.empty();
-        $select.find("option").each(function () {
-          var dis = this.disabled ? ' aria-disabled="true"' : "";
-          $menu.append(
-            '<div class="u-item" role="option" data-value="' +
-              this.value +
-              '" data-text="' +
-              $('<div>').text($(this).text()).html() +
-              '"' +
-              dis +
-              ">" +
-              $(this).text() +
-              "</div>"
-          );
-        });
-      }
-
-      function isPlaceholder($opt) {
-        return $opt.is("[data-placeholder]") || $.trim($opt.val()) === "";
-      }
-
-      function syncSelectedState(val) {
-        $menu.find(".u-item").attr("aria-selected", "false");
-        $menu.find('.u-item[data-value="' + val + '"]').attr("aria-selected", "true");
-      }
-
-      function setDisplayText(text) {
-        if (isSearchable) {
-          $toggle.val(text);
-        } else {
-          $toggle.text(text);
-        }
-      }
-
-      function getDisplayText() {
-        return isSearchable ? $toggle.val() : $toggle.text();
-      }
-
-      function setByValue(val, fire) {
-        var $opt = $select.find('option[value="' + val + '"]');
-        if (!$opt.length) $opt = $select.find("option").eq(0);
-
-        selectedTextCache = $.trim($opt.text());
-        setDisplayText(selectedTextCache);
-        syncSelectedState($opt.val());
-
-        if (isPlaceholder($opt)) {
-          $toggle.removeClass("selected");
-        } else {
-          $toggle.addClass("selected");
-        }
-
-        if (fire) {
-          $select.val($opt.val()).trigger("change");
-        }
-      }
-
-      function position() {
-        if (!$wrap.hasClass("open")) return;
-
-        var r = $wrap[0].getBoundingClientRect();
-        var vh = window.innerHeight || document.documentElement.clientHeight;
-        var below = Math.max(0, vh - r.bottom - 8);
-        var above = Math.max(0, r.top - 8);
-
-        var natural = $menu
-          .removeClass("drop-up")
-          .css({ maxHeight: "" })
-          .outerHeight();
-
-        var up = natural > below && above > below;
-        if (up) $menu.addClass("drop-up");
-
-        var avail = up ? above : below;
-        var maxH = Math.max(120, avail);
-
-        $menu.css({
-          maxHeight: maxH,
-          overflowY: natural > maxH ? "auto" : "hidden",
-        });
-      }
-
-      function filterMenu(keyword) {
-        var text = $.trim(keyword).toLowerCase();
-        var visibleCount = 0;
-
-        $menu.find(".u-item").each(function () {
-          var $item = $(this);
-          var itemText = $.trim($item.text()).toLowerCase();
-
-          if (!text || itemText.indexOf(text) > -1) {
-            $item.show();
-            visibleCount++;
-          } else {
-            $item.hide();
-          }
-        });
-
-        return visibleCount;
-      }
-
-      function resetFilterToSelected() {
-        $menu.find(".u-item").show();
-        setDisplayText(selectedTextCache);
-      }
-
-      function open() {
-        if ($select.prop("disabled")) return;
-
-        closeAll();
-        $wrap.addClass("open").attr("aria-expanded", "true");
-
-        if (isSearchable) {
-          resetFilterToSelected();
-        }
-
-        position();
-
-        var $container = $wrap.closest(".search-wrap");
-        if ($container.length) $container.addClass("has-open-dropdown");
-
-        if (isSearchable) {
-          setTimeout(function () {
-            $toggle.trigger("focus");
-            $toggle.select();
-          }, 0);
-        }
-      }
-
-      function close(restoreText) {
-        $wrap.removeClass("open").attr("aria-expanded", "false");
-
-        if (restoreText !== false && isSearchable) {
-          $toggle.val(selectedTextCache);
-        }
-
-        $menu.find(".u-item").show();
-
-        var $container = $wrap.closest(".search-wrap");
-        if ($container.length) {
-          if ($container.find(".u-select.open").length === 0) {
-            $container.removeClass("has-open-dropdown");
-          }
-        }
-      }
-
-      $toggle.on("click", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        $wrap.hasClass("open") ? close(true) : open();
-      });
-
-      if (isSearchable) {
-        $toggle.on("focus", function (e) {
-          e.stopPropagation();
-          if (!$wrap.hasClass("open")) {
-            open();
-          }
-        });
-
-        $toggle.on("input", function () {
-          var keyword = $(this).val();
-          var count = filterMenu(keyword);
-
-          if (!$wrap.hasClass("open")) {
-            open();
-          }
-
-          if (count > 0) {
-            position();
-          }
-        });
-      }
-
-      $toggle.on("keydown", function (e) {
-        var k = e.key;
-        var $visibleItems = $menu.find(".u-item:visible:not([aria-disabled='true'])");
-        var $current = $visibleItems.filter("[aria-selected='true']").first();
-        var idx = $visibleItems.index($current);
-
-        if (k === "Escape") {
-          e.preventDefault();
-          close(true);
-          return;
-        }
-
-        if (k === "Enter" || (!isSearchable && k === " ")) {
-          e.preventDefault();
-
-          if (!$wrap.hasClass("open")) {
-            open();
-            return;
-          }
-
-          if ($visibleItems.length) {
-            var $targetEnter = $visibleItems.eq(idx >= 0 ? idx : 0);
-            setByValue($targetEnter.data("value"), true);
-          }
-
-          close(true);
-          return;
-        }
-
-        if (k === "ArrowDown" || k === "ArrowUp") {
-          e.preventDefault();
-
-          if (!$wrap.hasClass("open")) {
-            open();
-            return;
-          }
-
-          if (!$visibleItems.length) return;
-
-          if (idx < 0) idx = 0;
-          else {
-            idx =
-              k === "ArrowDown"
-                ? Math.min($visibleItems.length - 1, idx + 1)
-                : Math.max(0, idx - 1);
-          }
-
-          var $target = $visibleItems.eq(idx);
-          syncSelectedState($target.data("value"));
-          setDisplayText($.trim($target.text()));
-
-          var menuEl = $menu[0];
-          var itemEl = $target[0];
-          if (menuEl && itemEl) {
-            var itemTop = itemEl.offsetTop;
-            var itemBottom = itemTop + itemEl.offsetHeight;
-            var viewTop = menuEl.scrollTop;
-            var viewBottom = viewTop + menuEl.clientHeight;
-
-            if (itemTop < viewTop) menuEl.scrollTop = itemTop;
-            else if (itemBottom > viewBottom) menuEl.scrollTop = itemBottom - menuEl.clientHeight;
-          }
-        }
-      });
-
-      $menu.on("click", ".u-item", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        if ($(this).attr("aria-disabled") === "true") return;
-
-        setByValue($(this).data("value"), true);
-        close(true);
-      });
-
-      $(document).on("click", function () {
-        if ($wrap.hasClass("open")) {
-          close(true);
-        }
-      });
-
-      $(window).on("resize scroll", position);
-
-      var mo = new MutationObserver(function () {
-        render();
-        setByValue($select.val(), false);
-        $wrap.toggleClass("disabled", $select.prop("disabled"));
-
-        if (isSearchable) {
-          $toggle.prop("disabled", $select.prop("disabled"));
-        } else {
-          $toggle.attr("tabindex", $select.prop("disabled") ? -1 : 0);
-        }
-      });
-
-      mo.observe($select[0], {
-        attributes: true,
-        childList: true,
-        subtree: true,
-      });
-
-      render();
-      setByValue($select.val(), false);
-      $wrap.toggleClass("disabled", $select.prop("disabled"));
-
-      if (isSearchable) {
-        $toggle.prop("disabled", $select.prop("disabled"));
-      } else {
-        $toggle.attr("tabindex", $select.prop("disabled") ? -1 : 0);
-      }
-
-      var inlineWidth = $select[0].style.width;
-      if (inlineWidth) {
-        $wrap.css("width", inlineWidth);
-      }
-
-      $select.css({
-        position: "absolute",
-        opacity: 0,
-        width: 0,
-        height: 0,
-        pointerEvents: "none",
-      });
-
-      $select.after($wrap);
-    });
-  };
-})(jQuery);
-
-사용은 이렇게 하면 돼.
-
-기본형:
-
-<select class="u-select-target">
-
-검색형:
-
-<select class="u-select-target u-select-search">
-
-초기화:
-
-$(".u-select-target").upgradeSelectToDropdown();
-
-그리고 CSS는 검색형 input이 깨지지 않게 이것만 하나 추가해주면 좋아:
-
-.u-select-input {
-  width: 100%;
-  box-sizing: border-box;
-  cursor: text;
-}
-
-정리하면:
-	•	u-select-search 없음 → 기존 드롭다운처럼 동작
-	•	u-select-search 있음 → 같은 u-select 스타일인데 입력/검색 가능
-
-이렇게 하면 기존 화면 안 깨고 필요한 곳만 검색형으로 바꿀 수 있어.
-
-
-
-맞아, 이거면 새로 따로 만들기보다 u-select 자체에 검색 기능을 녹이는 게 제일 자연스러워.
-
-지금 구조를 보면 이미:
-	•	원본 select 숨김
-	•	u-select 커스텀 UI 생성
-	•	option 렌더링
-	•	선택값 동기화
-
-까지 다 되어 있어서, 여기에 검색 input + 필터링만 얹으면 돼.
-
-핵심 아이디어는 이거야:
-	•	기존 u-select-toggle를 div 대신 input으로 바꿈
-	•	input에 텍스트 입력하면 u-item 필터링
-	•	항목 클릭하면 input에 선택 텍스트 표시
-	•	실제 값은 기존처럼 원본 select에 반영
-	•	바깥 클릭하면 닫고, 선택 안 했으면 원래 선택값 텍스트로 복원
-
-아래는 네 코드에 맞춰 검색형으로 통합한 버전이야.
-
-// ========== 커스텀 셀렉트 + 검색 ==========
-(function ($) {
-  function closeAll() {
-    $(".u-select.open").each(function () {
-      var $wrap = $(this);
-      $wrap.removeClass("open").attr("aria-expanded", "false");
-
-      var $container = $wrap.closest(".search-wrap");
-      if ($container.length) {
-        if ($container.find(".u-select.open").length === 0) {
-          $container.removeClass("has-open-dropdown");
-        }
-      }
-    });
-  }
-
-  $.fn.upgradeSelectToDropdown = function () {
-    return this.each(function () {
-      var $select = $(this);
-      if ($select.data("upgraded")) return;
-      $select.data("upgraded", true);
-
-      var $wrap = $(
-        '<div class="u-select" role="combobox" aria-expanded="false" style="margin-top: 5px;">' +
-          ' <input type="text" class="u-select-toggle u-select-input" autocomplete="off" />' +
-          ' <div class="u-menu" role="listbox"></div>' +
-        "</div>"
-      );
-
-      var $toggle = $wrap.find(".u-select-toggle");
-      var $menu = $wrap.find(".u-menu");
-      var selectedTextCache = "";
-
-      function render() {
-        $menu.empty();
-
-        $select.find("option").each(function () {
-          var dis = this.disabled ? ' aria-disabled="true"' : "";
-          $menu.append(
-            '<div class="u-item" role="option" data-value="' +
-              this.value +
-              '" data-text="' +
-              $('<div>').text($(this).text()).html() +
-              '"' +
-              dis +
-              ">" +
-              $(this).text() +
-              "</div>"
-          );
-        });
-      }
-
-      function isPlaceholder($opt) {
-        return $opt.is("[data-placeholder]") || $.trim($opt.val()) === "";
-      }
-
-      function getSelectedOption() {
-        var $opt = $select.find("option:selected");
-        if (!$opt.length) $opt = $select.find("option").eq(0);
-        return $opt;
-      }
-
-      function syncSelectedState(val) {
-        $menu.find(".u-item").attr("aria-selected", "false");
-        $menu.find('.u-item[data-value="' + val + '"]').attr("aria-selected", "true");
-      }
-
-      function setByValue(val, fire) {
-        var $opt = $select.find('option[value="' + val + '"]');
-        if (!$opt.length) $opt = $select.find("option").eq(0);
-
-        selectedTextCache = $.trim($opt.text());
-        $toggle.val(selectedTextCache);
-        syncSelectedState($opt.val());
-
-        if (isPlaceholder($opt)) {
-          $toggle.removeClass("selected");
-        } else {
-          $toggle.addClass("selected");
-        }
-
-        if (fire) {
-          $select.val($opt.val()).trigger("change");
-        }
-      }
-
-      function position() {
-        if (!$wrap.hasClass("open")) return;
-
-        var r = $wrap[0].getBoundingClientRect();
-        var vh = window.innerHeight || document.documentElement.clientHeight;
-        var below = Math.max(0, vh - r.bottom - 8);
-        var above = Math.max(0, r.top - 8);
-
-        var natural = $menu
-          .removeClass("drop-up")
-          .css({ maxHeight: "" })
-          .outerHeight();
-
-        var up = natural > below && above > below;
-        if (up) $menu.addClass("drop-up");
-
-        var avail = up ? above : below;
-        var maxH = Math.max(120, avail);
-
-        $menu.css({
-          maxHeight: maxH,
-          overflowY: natural > maxH ? "auto" : "hidden",
-        });
-      }
-
-      function filterMenu(keyword) {
-        var text = $.trim(keyword).toLowerCase();
-        var visibleCount = 0;
-
-        $menu.find(".u-item").each(function () {
-          var $item = $(this);
-          var itemText = $.trim($item.text()).toLowerCase();
-
-          if (!text || itemText.indexOf(text) > -1) {
-            $item.show();
-            visibleCount++;
-          } else {
-            $item.hide();
-          }
-        });
-
-        return visibleCount;
-      }
-
-      function resetFilterToSelected() {
-        $menu.find(".u-item").show();
-        $toggle.val(selectedTextCache);
-      }
-
-      function open() {
-        if ($select.prop("disabled")) return;
-
-        closeAll();
-        $wrap.addClass("open").attr("aria-expanded", "true");
-
-        // 열 때 기존 선택 텍스트를 보여주고, 전체 목록 표시
-        resetFilterToSelected();
-        position();
-
-        var $container = $wrap.closest(".search-wrap");
-        if ($container.length) $container.addClass("has-open-dropdown");
-
-        // 입력칸 포커스 + 전체선택
-        setTimeout(function () {
-          $toggle.trigger("focus");
-          $toggle.select();
-        }, 0);
-      }
-
-      function close(restoreText) {
-        $wrap.removeClass("open").attr("aria-expanded", "false");
-
-        if (restoreText !== false) {
-          $toggle.val(selectedTextCache);
-        }
-
-        $menu.find(".u-item").show();
-
-        var $container = $wrap.closest(".search-wrap");
-        if ($container.length) {
-          if ($container.find(".u-select.open").length === 0) {
-            $container.removeClass("has-open-dropdown");
-          }
-        }
-      }
-
-      $toggle.on("focus click", function (e) {
-        e.stopPropagation();
-        if (!$wrap.hasClass("open")) {
-          open();
-        }
-      });
-
-      $toggle.on("input", function () {
-        var keyword = $(this).val();
-        var count = filterMenu(keyword);
-
-        if (!$wrap.hasClass("open")) {
-          open();
-        }
-
-        if (count > 0) {
-          position();
-        }
-      });
-
-      $toggle.on("keydown", function (e) {
-        var k = e.key;
-        var $visibleItems = $menu.find(".u-item:visible:not([aria-disabled='true'])");
-        var $current = $visibleItems.filter("[aria-selected='true']").first();
-        var idx = $visibleItems.index($current);
-
-        if (k === "Escape") {
-          e.preventDefault();
-          close(true);
-          return;
-        }
-
-        if (k === "ArrowDown" || k === "ArrowUp") {
-          e.preventDefault();
-
-          if (!$wrap.hasClass("open")) {
-            open();
-            return;
-          }
-
-          if (!$visibleItems.length) return;
-
-          if (idx < 0) idx = 0;
-          else {
-            idx = k === "ArrowDown"
-              ? Math.min($visibleItems.length - 1, idx + 1)
-              : Math.max(0, idx - 1);
-          }
-
-          var $target = $visibleItems.eq(idx);
-          syncSelectedState($target.data("value"));
-          $toggle.val($.trim($target.text()));
-
-          var menuEl = $menu[0];
-          var itemEl = $target[0];
-          if (menuEl && itemEl) {
-            var itemTop = itemEl.offsetTop;
-            var itemBottom = itemTop + itemEl.offsetHeight;
-            var viewTop = menuEl.scrollTop;
-            var viewBottom = viewTop + menuEl.clientHeight;
-
-            if (itemTop < viewTop) menuEl.scrollTop = itemTop;
-            else if (itemBottom > viewBottom) menuEl.scrollTop = itemBottom - menuEl.clientHeight;
-          }
-          return;
-        }
-
-        if (k === "Enter") {
-          e.preventDefault();
-
-          if (!$wrap.hasClass("open")) {
-            open();
-            return;
-          }
-
-          if ($visibleItems.length) {
-            var $targetItem = $visibleItems.eq(idx >= 0 ? idx : 0);
-            setByValue($targetItem.data("value"), true);
-          }
-
-          close(true);
-        }
-      });
-
-      $menu.on("click", ".u-item", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        if ($(this).attr("aria-disabled") === "true") return;
-
-        setByValue($(this).data("value"), true);
-        close(true);
-      });
-
-      $(document).on("click", function () {
-        if ($wrap.hasClass("open")) {
-          close(true);
-        }
-      });
-
-      $(window).on("resize scroll", position);
-
-      var mo = new MutationObserver(function () {
-        render();
-        setByValue($select.val(), false);
-        $wrap.toggleClass("disabled", $select.prop("disabled"));
-        $toggle.prop("disabled", $select.prop("disabled"));
-      });
-
-      mo.observe($select[0], {
-        attributes: true,
-        childList: true,
-        subtree: true,
-      });
-
-      render();
-      setByValue($select.val(), false);
-
-      $wrap.toggleClass("disabled", $select.prop("disabled"));
-      $toggle.prop("disabled", $select.prop("disabled"));
-
-      var inlineWidth = $select[0].style.width;
-      if (inlineWidth) {
-        $wrap.css("width", inlineWidth);
-      }
-
-      // 원본 select 숨기고 삽입
-      $select.css({
-        position: "absolute",
-        opacity: 0,
-        width: 0,
-        height: 0,
-        pointerEvents: "none",
-      });
-
-      $select.after($wrap);
-    });
-  };
-})(jQuery);
-
-그리고 CSS도 input이 들어가니까 u-select-toggle에 input 스타일을 먹게 조금 맞춰줘야 해:
-
-.u-select {
-  position: relative;
-}
-
-.u-select-toggle.u-select-input {
-  width: 100%;
-  box-sizing: border-box;
-  cursor: text;
-}
-
-.u-menu {
-  position: absolute;
-  left: 0;
-  right: 0;
-  z-index: 9999;
-}
-
-.u-item[aria-disabled="true"] {
-  opacity: 0.5;
-  pointer-events: none;
-}
-
-동작은 이렇게 돼:
-	•	평소엔 선택된 값이 input에 보임
-	•	클릭하거나 포커스 주면 열림
-	•	입력하면 목록이 필터링됨
-	•	Enter / 화살표 / 클릭으로 선택 가능
-	•	닫히면 최종 선택 텍스트가 input에 남음
-	•	실제 submit 값은 원본 select가 가짐
-
-이 방식의 장점은 기존 u-select 구조와 스타일을 최대한 살리면서 검색만 추가한다는 거야.
-
-원하면 내가 다음 답변에서 이 버전을 기준으로 placeholder 유지, 초기값 없을 때 빈칸 처리, 한글 입력 대응 안정화까지 다듬어서 더 줄게.
+RouteConfig.cs랑 A2Controller 구조 보여주면 어디서 /a2가 살아나는지 바로 짚어줄 수 있어.
