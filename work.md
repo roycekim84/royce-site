@@ -1,3 +1,129 @@
+가능해. 다만 command.className 자체는 정적인 문자열이라서, 행마다 true/false에 따라 자동으로 달라지게 넣기엔 안 맞아. Kendo Grid 문서상 columns.command.className은 “커맨드 버튼에 적용되는 CSS 클래스”이고, command는 배열로 둘 수 있어. 또 command.visible은 행의 data item을 받아 버튼 표시 여부를 정할 수 있어.  ￼
+
+그래서 네 요구사항처럼
+각 행의 dataItem 값(true/false)에 따라 버튼 색 클래스를 다르게 하려면 보통 두 방법이 있어.
+
+제일 무난한 방법
+
+command는 그대로 쓰고, 그리드가 렌더링된 뒤 dataBound에서 각 행의 버튼 클래스를 바꿔주는 방식.
+
+이게 좋은 이유:
+	•	command의 클릭 핸들러 구조를 유지할 수 있음
+	•	버튼 2개도 그대로 유지 가능
+	•	true/false에 따라 클래스만 교체하면 됨
+
+예시:
+
+$("#grid").kendoGrid({
+    dataSource: dataSource,
+    dataBound: function () {
+        var grid = this;
+
+        grid.tbody.find("tr").each(function () {
+            var dataItem = grid.dataItem(this);
+            var $tr = $(this);
+
+            var $btn1 = $tr.find(".k-grid-btn1");
+            var $btn2 = $tr.find(".k-grid-btn2");
+
+            $btn1.removeClass("btn-on btn-off")
+                 .addClass(dataItem.btn1Yn ? "btn-on" : "btn-off");
+
+            $btn2.removeClass("btn-on btn-off")
+                 .addClass(dataItem.btn2Yn ? "btn-on" : "btn-off");
+        });
+    },
+    columns: [
+        { field: "name", title: "이름" },
+        {
+            title: "동작",
+            width: 220,
+            command: [
+                {
+                    name: "btn1",
+                    text: "버튼1",
+                    className: "cmd-btn k-grid-btn1",
+                    click: function (e) {
+                        e.preventDefault();
+                        var tr = $(e.target).closest("tr");
+                        var data = this.dataItem(tr);
+                        console.log("btn1", data);
+                    }
+                },
+                {
+                    name: "btn2",
+                    text: "버튼2",
+                    className: "cmd-btn k-grid-btn2",
+                    click: function (e) {
+                        e.preventDefault();
+                        var tr = $(e.target).closest("tr");
+                        var data = this.dataItem(tr);
+                        console.log("btn2", data);
+                    }
+                }
+            ]
+        }
+    ]
+});
+
+CSS:
+
+.btn-on {
+    background: #4caf50 !important;
+    color: #fff !important;
+    border-color: #4caf50 !important;
+}
+
+.btn-off {
+    background: #d9d9d9 !important;
+    color: #666 !important;
+    border-color: #d9d9d9 !important;
+}
+
+여기서 포인트는:
+	•	name: "btn1" 이면 버튼 anchor에 k-grid-btn1 클래스가 붙음
+	•	그래서 dataBound에서 .k-grid-btn1, .k-grid-btn2를 찾아 행별로 클래스 교체 가능
+	•	click 안에서는 공식 예제처럼 this.dataItem(tr)로 현재 행 데이터를 읽으면 됨. Kendo 문서도 커스텀 command의 click 함수에서 this가 grid 인스턴스이고, closest("tr") 후 dataItem(tr) 패턴을 보여준다.  ￼
+
+버튼을 아예 숨기고 싶을 때
+
+색만 바꾸는 게 아니라 어떤 행에서는 버튼을 안 보이게 하고 싶으면 command.visible도 쓸 수 있어. visible은 row 초기화 때 data item을 받아 표시 여부를 결정한다.  ￼
+
+예:
+
+{
+    name: "btn2",
+    text: "버튼2",
+    className: "cmd-btn k-grid-btn2",
+    visible: function(dataItem) {
+        return dataItem.btn2Yn === true;
+    },
+    click: function(e) { ... }
+}
+
+더 세밀하게 꾸미고 싶으면
+
+columns.command.template도 있어. 이건 command 컬럼 내부 HTML을 더 자유롭게 바꿀 때 쓰고, 템플릿 안에서 click 핸들러가 동작하려면 k-grid-[command.name] 클래스를 넣어야 한다고 문서에 나와 있어.  ￼
+
+예를 들면:
+
+{
+    command: [
+        {
+            name: "btn1",
+            template: "<a class='k-button k-grid-btn1'>버튼1</a>",
+            click: function(e) { ... }
+        }
+    ]
+}
+
+그런데 네 현재 상황은 이미 command 배열로 바꿨고, 클릭도 써야 하니까 지금은 dataBound에서 클래스만 갈아끼우는 방식이 제일 깔끔해.
+
+한 줄로 정리하면:
+command.className은 행별 동적 값으로 바꾸기 어렵고, dataBound에서 각 row의 dataItem을 보고 .k-grid-btn1, .k-grid-btn2에 btn-on / btn-off 클래스를 붙이는 방식이 가장 무난해.  ￼
+
+네가 지금 쓰는 columns.command 코드 붙여주면 그 형태 그대로 true/false 클래스 적용 버전으로 바로 바꿔줄게.
+
 응, 가능해.
 Kendo Grid는 columns.template 로 컬럼 안 HTML을 커스텀할 수 있어서, 버튼 2개를 한 셀 안에 넣고, 각 버튼의 0/1 값에 따라 색만 다르게 줄 수 있어. 공식 문서도 columns.template가 셀 내용을 원하는 HTML로 렌더링할 때 쓰는 옵션이라고 안내해.  ￼
 
