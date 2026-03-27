@@ -1,3 +1,54 @@
+가능해.
+NULL일 때 랜덤 10글자 문자열을 넣고 싶으면 NEWID()를 문자열로 바꿔서 잘라 쓰면 제일 간단해.
+
+가장 쉬운 방법
+
+ISNULL(a, LEFT(REPLACE(CONVERT(VARCHAR(36), NEWID()), '-', ''), 10))
+
+뜻
+	•	NEWID() → 예: A1B2C3D4-E5F6-...
+	•	CONVERT(VARCHAR(36), NEWID()) → 문자열 변환
+	•	REPLACE(..., '-', '') → - 제거
+	•	LEFT(..., 10) → 앞 10글자만 사용
+	•	ISNULL(a, ...) → a가 NULL이면 그 랜덤 문자열 사용
+
+⸻
+
+예시
+
+SELECT ISNULL(a, LEFT(REPLACE(CONVERT(VARCHAR(36), NEWID()), '-', ''), 10)) AS random_str
+FROM xtable;
+
+
+⸻
+
+소문자로 하고 싶으면
+
+SELECT ISNULL(a, LOWER(LEFT(REPLACE(CONVERT(VARCHAR(36), NEWID()), '-', ''), 10))) AS random_str
+FROM xtable;
+
+
+⸻
+
+영문+숫자 랜덤 10자리 느낌으로 충분한가?
+
+이 방식은 사실상 16진수 문자(0-9, a-f 또는 A-F) 기반이야.
+즉 완전한 a-zA-Z0-9 랜덤은 아니고, 보통 실무에선 이걸로도 많이 충분해.
+
+예:
+	•	3f8a1c9d0b
+	•	A12F9C88DE
+
+⸻
+
+만약 진짜 아무 문자 조합처럼 더 넓게 하고 싶으면
+
+조금 더 복잡해지는데, 보통은 위 방식이 제일 간단하고 안전해.
+
+한 줄로 말하면 이거 쓰면 돼:
+
+ISNULL(a, LEFT(REPLACE(CONVERT(VARCHAR(36), NEWID()), '-', ''), 10))
+
 가능해. dataBound에서 값 기준으로 버튼 두 개 클래스 분기하면 돼.
 
 네 조건은 이거지:
