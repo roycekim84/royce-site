@@ -1,3 +1,103 @@
+가능해. dataBound에서 값 기준으로 버튼 두 개 클래스 분기하면 돼.
+
+네 조건은 이거지:
+	•	null → 버튼 둘 다 btn-gray
+	•	0 → btn1만 btn-blue, 나머지는 btn-gray
+	•	1 → btn2만 btn-blue, 나머지는 btn-gray
+
+그럼 핵심은 먼저 두 버튼 다 초기화하고, 값에 따라 하나만 파란색으로 바꾸는 거야.
+
+예시:
+
+dataBound: function () {
+    var grid = this;
+
+    grid.tbody.find("tr").each(function () {
+        var data = grid.dataItem(this);
+        var $tr = $(this);
+
+        var $btn1 = $tr.find(".k-grid-btn1");
+        var $btn2 = $tr.find(".k-grid-btn2");
+
+        // 1) 먼저 둘 다 초기화
+        $btn1.removeClass("btn-blue btn-gray");
+        $btn2.removeClass("btn-blue btn-gray");
+
+        // 2) 기본은 둘 다 gray
+        $btn1.addClass("btn-gray");
+        $btn2.addClass("btn-gray");
+
+        // 3) 값에 따라 하나만 blue
+        if (data.alert === 0) {
+            $btn1.removeClass("btn-gray").addClass("btn-blue");
+        } else if (data.alert === 1) {
+            $btn2.removeClass("btn-gray").addClass("btn-blue");
+        }
+        // null이면 위 기본 상태 그대로 둘 다 gray
+    });
+}
+
+만약 null 체크를 더 명확히 하고 싶으면
+
+if (data.alert == null) {
+    // 둘 다 gray 유지
+} else if (data.alert === 0) {
+    $btn1.removeClass("btn-gray").addClass("btn-blue");
+} else if (data.alert === 1) {
+    $btn2.removeClass("btn-gray").addClass("btn-blue");
+}
+
+값이 문자열 "0", "1"로 올 수도 있으면
+
+가끔 서버에서 문자열로 오는 경우가 있어서, 그럴 땐 느슨하게 비교하거나 숫자로 변환해.
+
+if (data.alert == null) {
+    // 둘 다 gray
+} else if (data.alert == 0) {
+    $btn1.removeClass("btn-gray").addClass("btn-blue");
+} else if (data.alert == 1) {
+    $btn2.removeClass("btn-gray").addClass("btn-blue");
+}
+
+CSS 예시
+
+.btn-gray {
+    background-color: #d9d9d9 !important;
+    color: #666 !important;
+    border-color: #d9d9d9 !important;
+}
+
+.btn-blue {
+    background-color: #2f80ed !important;
+    color: #fff !important;
+    border-color: #2f80ed !important;
+}
+
+네 command 클래스가 이런 식이면
+
+command: [
+    {
+        name: "btn1",
+        text: "버튼1",
+        className: "my-btn k-grid-btn1"
+    },
+    {
+        name: "btn2",
+        text: "버튼2",
+        className: "my-btn k-grid-btn2"
+    }
+]
+
+위 dataBound 코드 그대로 붙이면 돼.
+
+한 줄로 줄이면 이 패턴이야:
+
+$btn1.add($btn2).removeClass("btn-blue btn-gray").addClass("btn-gray");
+if (data.alert == 0) $btn1.removeClass("btn-gray").addClass("btn-blue");
+if (data.alert == 1) $btn2.removeClass("btn-gray").addClass("btn-blue");
+
+원하면 내가 이걸 네 현재 columns.command 코드 모양에 그대로 끼워 넣은 완성본으로 정리해줄게.
+
 가능해. 다만 command.className 자체는 정적인 문자열이라서, 행마다 true/false에 따라 자동으로 달라지게 넣기엔 안 맞아. Kendo Grid 문서상 columns.command.className은 “커맨드 버튼에 적용되는 CSS 클래스”이고, command는 배열로 둘 수 있어. 또 command.visible은 행의 data item을 받아 버튼 표시 여부를 정할 수 있어.  ￼
 
 그래서 네 요구사항처럼
