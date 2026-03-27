@@ -1,3 +1,172 @@
+응, 가능해.
+Kendo Grid는 columns.template 로 컬럼 안 HTML을 커스텀할 수 있어서, 버튼 2개를 한 셀 안에 넣고, 각 버튼의 0/1 값에 따라 색만 다르게 줄 수 있어. 공식 문서도 columns.template가 셀 내용을 원하는 HTML로 렌더링할 때 쓰는 옵션이라고 안내해.  ￼
+
+가장 무난한 패턴은 이거야.
+
+1) 컬럼 템플릿에서 버튼 2개 만들기
+
+예를 들어 데이터가 이런 느낌이라고 치면:
+	•	btn1Yn: 0 또는 1
+	•	btn2Yn: 0 또는 1
+
+$("#grid").kendoGrid({
+    dataSource: dataSource,
+    columns: [
+        { field: "name", title: "이름" },
+        {
+            title: "동작",
+            width: 180,
+            template: function(dataItem) {
+                var btn1Class = dataItem.btn1Yn == 1 ? "btn-on" : "btn-off";
+                var btn2Class = dataItem.btn2Yn == 1 ? "btn-on" : "btn-off";
+
+                return ''
+                    + '<button type="button" class="k-button action-btn ' + btn1Class + '" data-type="btn1" data-id="' + dataItem.id + '">버튼1</button>'
+                    + ' '
+                    + '<button type="button" class="k-button action-btn ' + btn2Class + '" data-type="btn2" data-id="' + dataItem.id + '">버튼2</button>';
+            }
+        }
+    ]
+});
+
+이건 Kendo Grid의 columns.template를 함수로 써서 각 행의 dataItem 값을 읽고, 그 값에 따라 다른 HTML을 반환하는 방식이야. 공식 API 예제도 template를 문자열이나 함수로 써서 셀 내용을 커스터마이즈하는 방식을 보여줘.  ￼
+
+⸻
+
+2) 색만 다르게 보이게 CSS 주기
+
+.btn-on {
+    background-color: #4caf50;
+    color: #fff;
+    border-color: #4caf50;
+}
+
+.btn-off {
+    background-color: #d9d9d9;
+    color: #666;
+    border-color: #d9d9d9;
+}
+
+그러면:
+	•	값이 1이면 초록
+	•	값이 0이면 회색
+
+이런 식으로 바로 표현 가능해.
+
+⸻
+
+3) 클릭 이벤트는 이벤트 위임으로 처리
+
+그리드는 다시 렌더링될 수 있어서 버튼에 직접 .click() 거는 것보다 이벤트 위임이 안전해.
+
+$(document).on("click", "#grid .action-btn", function () {
+    var id = $(this).data("id");
+    var type = $(this).data("type");
+
+    console.log("클릭됨", id, type);
+});
+
+
+⸻
+
+만약 필드가 하나만 있고 그걸로 버튼 둘 다 상태를 나누는 거면
+
+예를 들어 한 행에 들어오는 값이 하나이고:
+	•	status1
+	•	status2
+
+가 아니라 진짜 한 값만 있으면, 그 값 기준으로 두 버튼 클래스를 따로 계산하면 돼.
+
+예:
+
+template: function(dataItem) {
+    return ''
+        + '<button type="button" class="k-button ' + (dataItem.useYn == 1 ? "btn-on" : "btn-off") + '">권한신청</button>'
+        + ' '
+        + '<button type="button" class="k-button ' + (dataItem.useYn == 0 ? "btn-on" : "btn-off") + '">해제</button>';
+}
+
+
+⸻
+
+실무적으로 더 깔끔한 버전
+
+삼항연산자가 길어지면 함수로 빼는 게 보기 편해.
+
+function getStateClass(value) {
+    return value == 1 ? "btn-on" : "btn-off";
+}
+
+$("#grid").kendoGrid({
+    dataSource: dataSource,
+    columns: [
+        {
+            title: "동작",
+            template: function(dataItem) {
+                return ''
+                    + '<button type="button" class="k-button ' + getStateClass(dataItem.btn1Yn) + '">버튼1</button>'
+                    + ' '
+                    + '<button type="button" class="k-button ' + getStateClass(dataItem.btn2Yn) + '">버튼2</button>';
+            }
+        }
+    ]
+});
+
+
+⸻
+
+주의할 점
+
+Kendo Grid 템플릿은 HTML을 그대로 넣을 수 있어서 편하지만, 버튼 라벨이나 데이터가 사용자 입력값이면 인코딩도 신경 써야 해. 공식 문서 예제도 템플릿에서 kendo.htmlEncode()를 쓰는 예를 보여줘.  ￼
+
+⸻
+
+네가 바로 가져다 쓰기 좋은 예시
+
+$("#grid").kendoGrid({
+    dataSource: dataSource,
+    pageable: true,
+    columns: [
+        { field: "userNm", title: "사용자명" },
+        {
+            title: "권한",
+            width: 220,
+            template: function(dataItem) {
+                var applyClass = dataItem.applyYn == 1 ? "btn-on" : "btn-off";
+                var cancelClass = dataItem.cancelYn == 1 ? "btn-on" : "btn-off";
+
+                return ''
+                    + '<button type="button" class="k-button auth-btn ' + applyClass + '" data-mode="apply" data-id="' + dataItem.userId + '">신청</button>'
+                    + ' '
+                    + '<button type="button" class="k-button auth-btn ' + cancelClass + '" data-mode="cancel" data-id="' + dataItem.userId + '">해제</button>';
+            }
+        }
+    ]
+});
+
+$(document).on("click", "#grid .auth-btn", function () {
+    var userId = $(this).data("id");
+    var mode = $(this).data("mode");
+
+    console.log("userId:", userId, "mode:", mode);
+});
+
+.btn-on {
+    background: #4caf50;
+    color: #fff;
+    border: 1px solid #4caf50;
+}
+
+.btn-off {
+    background: #dcdcdc;
+    color: #666;
+    border: 1px solid #dcdcdc;
+}
+
+원하면 네가 실제로 쓰는 columns 코드 한 덩어리에 맞춰서 바로 끼워 넣는 형태로 바꿔줄게.
+
+
+
 그건 보통 라우팅/가상경로/리라이트 규칙 차이 때문이야.
 
 네 상황을 풀면 지금 이런 거지:
