@@ -1,3 +1,77 @@
+그럼 짧게 보이는 값이랑 원본 전체 message 값을 둘 다 따로 넣어두면 돼.
+
+즉:
+	•	value에는 20자 자른 텍스트
+	•	data-message에는 원본 전체 message
+	•	클릭 밖에서
+	•	data-name
+	•	data-bname
+	•	data-message
+를 꺼내서 쓰면 됨
+
+예시 이렇게.
+
+{
+    field: "message",
+    title: "알림",
+    template: function (dataItem) {
+        var fullText = dataItem.message || "";
+        var shortText = fullText.length > 20 ? fullText.substring(0, 20) + "..." : fullText;
+
+        var safeShortText = shortText.replace(/"/g, "&quot;");
+        var safeFullText = fullText.replace(/"/g, "&quot;");
+        var safeName = (dataItem.name || "").replace(/"/g, "&quot;");
+        var safeBname = (dataItem.bname || "").replace(/"/g, "&quot;");
+
+        return '<input type="text" ' +
+               'class="grid-text-click" ' +
+               'value="' + safeShortText + '" ' +
+               'data-message="' + safeFullText + '" ' +
+               'data-name="' + safeName + '" ' +
+               'data-bname="' + safeBname + '" ' +
+               'readonly ' +
+               'style="cursor:pointer;" />';
+    }
+}
+
+그리고 밖에서:
+
+$(document).on("click", ".grid-text-click", function () {
+    var name = $(this).data("name");
+    var bname = $(this).data("bname");
+    var message = $(this).data("message");
+
+    console.log("name:", name);
+    console.log("bname:", bname);
+    console.log("message:", message);
+
+    funca(true, name, bname, message);
+});
+
+핵심은 이거야:
+	•	화면에 보이는 건 value
+	•	실제 넘길 원본은 data-message
+
+그래서 보이는 건 잘려도, 클릭했을 때는 원본 전체 message를 그대로 쓸 수 있어.
+
+조금 더 안전하게 하려면 작은 함수로 escape 처리해도 좋아:
+
+function escapeAttr(value) {
+    return (value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+}
+
+그리고 template 안에서:
+
+var safeFullText = escapeAttr(fullText);
+
+이렇게 쓰면 더 안전해.
+
+제일 짧게 말하면, 네 경우는 data-message에 원본 넣고 클릭 밖에서 꺼내 쓰는 방식이 맞아.
+
 응, 밖으로 뺀 방식으로 다시 쓰면 이렇게야.
 
 핵심은:
