@@ -1,3 +1,97 @@
+응, 밖으로 뺀 방식으로 다시 쓰면 이렇게야.
+
+핵심은:
+	•	*Kendo Grid template 안에는 class랑 data-만 넣고
+	•	클릭 이벤트는 바깥에서 $(document).on(...)으로 연결
+
+1) Kendo Grid 컬럼 template
+
+예를 들어 message, name, bname 필드를 쓴다고 하면:
+
+{
+    field: "message",
+    title: "알림",
+    template: function (dataItem) {
+        var text = dataItem.message || "";
+        var shortText = text.length > 20 ? text.substring(0, 20) + "..." : text;
+
+        var safeValue = shortText.replace(/"/g, "&quot;");
+        var safeName = (dataItem.name || "").replace(/"/g, "&quot;");
+        var safeBname = (dataItem.bname || "").replace(/"/g, "&quot;");
+
+        return '<input type="text" ' +
+               'class="grid-text-click" ' +
+               'value="' + safeValue + '" ' +
+               'data-name="' + safeName + '" ' +
+               'data-bname="' + safeBname + '" ' +
+               'readonly ' +
+               'style="cursor:pointer;" />';
+    }
+}
+
+2) 바깥에서 클릭 이벤트 연결
+
+$(document).on("click", ".grid-text-click", function () {
+    var name = $(this).data("name");
+    var bname = $(this).data("bname");
+
+    funca(true, name, bname);
+});
+
+3) 원하면 id나 다른 값도 같이 넘길 수 있음
+
+template: function (dataItem) {
+    var text = dataItem.message || "";
+    var shortText = text.length > 20 ? text.substring(0, 20) + "..." : text;
+
+    return '<input type="text" ' +
+           'class="grid-text-click" ' +
+           'value="' + shortText.replace(/"/g, "&quot;") + '" ' +
+           'data-id="' + dataItem.id + '" ' +
+           'data-name="' + (dataItem.name || "").replace(/"/g, "&quot;") + '" ' +
+           'data-bname="' + (dataItem.bname || "").replace(/"/g, "&quot;") + '" ' +
+           'readonly ' +
+           'style="cursor:pointer;" />';
+}
+
+$(document).on("click", ".grid-text-click", function () {
+    var id = $(this).data("id");
+    var name = $(this).data("name");
+    var bname = $(this).data("bname");
+
+    console.log(id);
+    funca(true, name, bname);
+});
+
+4) 커서만 CSS로 빼고 싶으면
+
+.grid-text-click {
+    cursor: pointer;
+}
+
+그럼 template에서는 style 빼도 돼:
+
+return '<input type="text" class="grid-text-click" ... readonly />';
+
+제일 짧은 형태
+
+template: function (dataItem) {
+    var text = dataItem.message || "";
+    var shortText = text.length > 20 ? text.substring(0, 20) + "..." : text;
+
+    return '<input type="text" class="grid-text-click" ' +
+           'value="' + shortText.replace(/"/g, "&quot;") + '" ' +
+           'data-name="' + (dataItem.name || "").replace(/"/g, "&quot;") + '" ' +
+           'data-bname="' + (dataItem.bname || "").replace(/"/g, "&quot;") + '" ' +
+           'readonly />';
+}
+
+$(document).on("click", ".grid-text-click", function () {
+    funca(true, $(this).data("name"), $(this).data("bname"));
+});
+
+원하면 이걸 네 현재 Kendo Grid columns 코드 모양에 맞게 바로 끼워서 정리해줄게.
+
 그건 보통 프로시저의 SELECT 1 결과값을 받은 게 아니라,
 C#에서 실행 결과(return value 또는 affected rows) 를 다른 방식으로 받고 있어서 그래.
 
