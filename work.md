@@ -1,3 +1,89 @@
+그럼 거의 원인 좁혀져.
+HTML엔 값이 붙어 있는데 $(this).data(...)로는 undefined 면, 보통은 data-* 읽는 방식 문제야.
+
+제일 먼저 이렇게 바꿔봐:
+
+$(document).on("click", ".grid-text-click", function () {
+    console.log("name attr:", $(this).attr("data-name"));
+    console.log("bname attr:", $(this).attr("data-bname"));
+    console.log("message attr:", $(this).attr("data-message"));
+
+    funca(
+        true,
+        $(this).attr("data-name"),
+        $(this).attr("data-bname"),
+        $(this).attr("data-message")
+    );
+});
+
+핵심은:
+	•	.data("name") 대신 .attr("data-name")
+	•	.data("message") 대신 .attr("data-message")
+
+왜 그러냐면, jQuery의 .data() 는 내부 캐시를 써서 동적으로 만들어진 속성값이나 렌더링 후 바뀐 값에서 헷갈릴 때가 있어.
+반면 .attr("data-name") 은 지금 DOM에 박혀있는 실제 속성값을 바로 읽어와서 이런 경우 더 확실해.
+
+⸻
+
+바로 확인할 디버깅 코드
+
+이것도 같이 찍어봐:
+
+$(document).on("click", ".grid-text-click", function () {
+    console.log(this);
+    console.log(this.outerHTML);
+    console.log("data-name:", $(this).attr("data-name"));
+    console.log("data-bname:", $(this).attr("data-bname"));
+    console.log("data-message:", $(this).attr("data-message"));
+});
+
+여기서 outerHTML에 예를 들어 이런 식으로 보이면:
+
+<input type="text" class="grid-text-click" value="abc..." data-name="Royce" data-bname="Kim" data-message="긴 원본 메시지">
+
+그럼 .attr(...) 로는 읽혀야 정상.
+
+⸻
+
+template도 다시 안전하게 쓰면
+
+template: function (dataItem) {
+    var fullText = dataItem.message || "";
+    var shortText = fullText.length > 20 ? fullText.substring(0, 20) + "..." : fullText;
+
+    function esc(v) {
+        return (v || "")
+            .replace(/&/g, "&amp;")
+            .replace(/"/g, "&quot;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+    }
+
+    return '<input type="text" ' +
+           'class="grid-text-click" ' +
+           'value="' + esc(shortText) + '" ' +
+           'data-name="' + esc(dataItem.name) + '" ' +
+           'data-bname="' + esc(dataItem.bname) + '" ' +
+           'data-message="' + esc(fullText) + '" ' +
+           'readonly style="cursor:pointer;" />';
+}
+
+
+⸻
+
+왜 undefined가 잘 뜨냐
+
+보통 이 경우 중 하나야:
+	•	$(this).data("message") 대신 실제 속성은 data-message인데 jQuery 캐시가 꼬임
+	•	클릭한 대상이 기대한 요소가 아님
+	•	값에 특수문자/따옴표가 들어가서 속성이 깨짐
+	•	템플릿 렌더링 후 DOM이 다시 바뀜
+
+그래서 지금은 .data() 말고 .attr()로 읽는 게 제일 빠른 해결이야.
+
+원하면 다음 답변에서 네 현재 template 코드랑 on click 코드를 기준으로 딱 맞게 한 덩어리로 정리해줄게.
+
+
 그럼 짧게 보이는 값이랑 원본 전체 message 값을 둘 다 따로 넣어두면 돼.
 
 즉:
