@@ -1,3 +1,80 @@
+alert()로는 안 돼.
+alert는 확인 버튼 1개만 있는 기본 팝업이라서, 네 / 아니오 두 버튼을 넣을 수 없어.
+
+대신 이런 걸 써야 해:
+	•	confirm()
+	•	또는 직접 만든 모달(div)
+
+네가 원하는 건 딱 confirm()이 가까워.
+
+가장 간단한 방법
+
+if (confirm("진행할까요?")) {
+    console.log(1);
+}
+
+동작:
+	•	네(확인) 누르면 → console.log(1)
+	•	아니오(취소) 누르면 → 그냥 닫힘
+
+다만 브라우저 기본 팝업이라 버튼 글자가 보통:
+	•	확인 / 취소
+	•	또는 브라우저 언어에 따라 다름
+
+즉 진짜 버튼 텍스트를 “네 / 아니오”로 바꾸는 건 기본 confirm()으로는 못 함.
+
+⸻
+
+네가 원하는 동작 기준
+
+이건 충분히 가능:
+
+var result = confirm("정말 실행하시겠습니까?");
+
+if (result) {
+    console.log(1);
+}
+
+
+⸻
+
+만약 진짜로 버튼 이름을 “네 / 아니오”로 하고 싶으면
+
+그건 alert/confirm 말고 직접 모달창 만들어야 해.
+
+예:
+
+<div id="myModal" style="display:none; position:fixed; top:30%; left:40%; background:#fff; border:1px solid #ccc; padding:20px;">
+    <p>정말 실행하시겠습니까?</p>
+    <button id="btnYes">네</button>
+    <button id="btnNo">아니오</button>
+</div>
+
+$("#myModal").show();
+
+$("#btnYes").on("click", function () {
+    console.log(1);
+    $("#myModal").hide();
+});
+
+$("#btnNo").on("click", function () {
+    $("#myModal").hide();
+});
+
+
+⸻
+
+한 줄 결론
+	•	alert()는 안 됨
+	•	confirm()은 가능
+	•	코드:
+
+if (confirm("진행할까요?")) {
+    console.log(1);
+}
+
+이걸 쓰면 네가 원하는 동작은 거의 바로 된다.
+
 그럼 거의 원인 좁혀져.
 HTML엔 값이 붙어 있는데 $(this).data(...)로는 undefined 면, 보통은 data-* 읽는 방식 문제야.
 
