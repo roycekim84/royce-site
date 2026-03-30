@@ -1,3 +1,76 @@
+될 수는 있는데, 지금 증상은 거의 inline onclick 안에서 문자열 인자 따옴표가 깨지는 문제야. Kendo Grid는 columns.template를 문자열 또는 함수로 렌더링할 수 있고, 문자열 인자를 JS 함수에 넘길 때는 따옴표를 제대로 감싸지 않으면 쉽게 깨진다. Telerik 포럼도 템플릿에서 문자열 인자를 함수에 넘길 때 single/double quote를 번갈아 쓰고 escape해야 한다고 안내해.  ￼
+
+제일 안전한 건 inline onclick에 직접 값 3개를 때려 넣지 말고, data-* 속성에 담아두고 클릭 시 꺼내 쓰는 방식이야. 그리드 셀 HTML은 template 함수로 만드는 게 공식적으로 가능한 패턴이고, HTML 인코딩도 같이 해주는 게 안전해.  ￼
+
+이렇게 해봐:
+
+{
+    field: "message",
+    title: "알림",
+    template: function (dataItem) {
+        var text = dataItem.message || "";
+        var shortText = text.length > 20 ? text.substring(0, 20) + "..." : text;
+
+        var name = (dataItem.name || "").replace(/"/g, "&quot;");
+        var bname = (dataItem.bname || "").replace(/"/g, "&quot;");
+        var valueText = shortText.replace(/"/g, "&quot;");
+
+        return '<input type="text" ' +
+               'class="grid-text-click" ' +
+               'value="' + valueText + '" ' +
+               'data-flag="true" ' +
+               'data-name="' + name + '" ' +
+               'data-bname="' + bname + '" ' +
+               'readonly ' +
+               'style="cursor:pointer;" />';
+    }
+}
+
+그리고 클릭은 이렇게:
+
+$(document).on("click", ".grid-text-click", function () {
+    var flag = $(this).data("flag");
+    var name = $(this).data("name");
+    var bname = $(this).data("bname");
+
+    funca(flag, name, bname);
+});
+
+이 방식이 좋은 이유는:
+	•	따옴표 지옥을 피함
+	•	이름에 공백이나 특수문자가 있어도 덜 깨짐
+	•	Kendo Grid가 다시 그려져도 이벤트 위임으로 안정적임
+
+그래도 꼭 template 안에 직접 onclick 을 쓰고 싶으면, 함수형 템플릿으로 문자열을 조립해야 해. 예를 들면:
+
+{
+    field: "message",
+    title: "알림",
+    template: function (dataItem) {
+        var text = dataItem.message || "";
+        var shortText = text.length > 20 ? text.substring(0, 20) + "..." : text;
+
+        var name = JSON.stringify(dataItem.name || "");
+        var bname = JSON.stringify(dataItem.bname || "");
+        var valueText = shortText.replace(/"/g, "&quot;");
+
+        return '<input type="text" ' +
+               'value="' + valueText + '" ' +
+               'readonly ' +
+               'style="cursor:pointer;" ' +
+               'onclick=\'funca(true, ' + name + ', ' + bname + ')\' />';
+    }
+}
+
+여기서 JSON.stringify(...)를 쓴 이유는 문자열에 따옴표가 있어도 JS 문자열 리터럴 형태로 안전하게 넘기기 쉽기 때문이야. 템플릿 문자열에서 인자 넘길 때 quote escaping이 문제라는 건 Telerik 포럼에서도 반복해서 나오는 이슈야.  ￼
+
+내 추천은 딱 하나야:
+inline onclick 버리고 data-* + $(document).on("click", ...)로 가는 것.
+이게 제일 덜 깨지고 유지보수도 편해.
+
+원하면 funca(true, name, bname) 기준으로 네 현재 template 코드를 통째로 바꿔줄게.
+
+
 가능해.
 NULL일 때 랜덤 10글자 문자열을 넣고 싶으면 NEWID()를 문자열로 바꿔서 잘라 쓰면 제일 간단해.
 
