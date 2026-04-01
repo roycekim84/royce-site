@@ -1,30 +1,38 @@
-가능해.
-lang 쿠키를 읽으면 돼.
+돼.
+근데 $(tr).val(text)는 row 전체에 쓰는 게 아니라 input 같은 폼 요소에 쓰는 거라서, Kendo Grid 행의 다른 컬럼 값을 바꾸려면 dataItem을 수정하는 방식이 맞아. Kendo Grid의 dataItem(row)는 그 행에 바인딩된 모델을 반환하고, 모델 값은 set(field, value)로 바꾸는 게 정석이야.  ￼
 
-순수 JS
+예를 들어 같은 줄의 input 값을 읽고, 같은 행의 다른 컬럼 status를 바꾸려면:
 
-function getCookie(name) {
-    var value = "; " + document.cookie;
-    var parts = value.split("; " + name + "=");
-    if (parts.length === 2) {
-        return parts.pop().split(";").shift();
-    }
-    return null;
-}
+var grid = $("#grid").data("kendoGrid");
+var tr = $(this).closest("tr");
+var dataItem = grid.dataItem(tr);
 
-var lang = getCookie("lang");
-console.log(lang);
+var text = tr.find(".grid-text").val();   // 같은 줄 input 값 읽기
+dataItem.set("status", text);             // 같은 줄 다른 컬럼 값 변경
 
-jQuery 써도 결국 쿠키는 document.cookie
+이렇게 하면 그리드 데이터도 바뀌고 화면도 반영돼. 반대로 dataItem["status"] = text처럼 직접 대입만 하면 내부 값은 바뀌어도 UI가 바로 안 갱신될 수 있어. Telerik 쪽도 모델 업데이트에는 set 메서드를 쓰라고 안내해.  ￼
 
-jQuery 자체엔 기본 쿠키 함수가 없어서 보통 위처럼 읽어.
+자주 쓰는 패턴은 이거야:
 
-ASP.NET 서버 쪽(C#)에서 가져오려면
+$(document).on("click", ".some-btn", function () {
+    var grid = $("#grid").data("kendoGrid");
+    var tr = $(this).closest("tr");
+    var dataItem = grid.dataItem(tr);
 
-var lang = Request.Cookies["lang"]?.Value;
+    var text = tr.find(".grid-text-click").val();
 
-참고
+    dataItem.set("message", text);
+    dataItem.set("otherField", "변경값");
+});
 
-setCookie("lang", "ko") 같은 식으로 저장했다면, 위 코드로 "ko"가 나와.
+정리하면:
+	•	input 값 읽기: tr.find(".클래스").val()
+	•	같은 행 다른 컬럼 변경: dataItem.set("필드명", 값)
 
-원하면 내가 setCookie랑 getCookie를 한 세트로 정리해줄게.
+그리고 네가 이미 attr로 값 읽고 있었다면 그것도 같이 가능해:
+
+var text = tr.find(".grid-text-click").attr("data-message");
+dataItem.set("message", text);
+
+한 줄 결론:
+가능하고, Kendo Grid에서는 같은 행의 다른 컬럼을 바꾸려면 grid.dataItem(tr).set("필드명", 값)으로 바꾸는 게 맞아.
