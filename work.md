@@ -1,3 +1,125 @@
+맞아. 딱 거기 수정하면 돼.
+
+지금 구조가:
+
+_createPagerButton: function(text, css, handler) {
+    var $link = $("<a>").attr("href", EMPTY_HREF).html(text).on("click", $.proxy(handler, this));
+
+    return $("<span>").addClass(css).append($link);
+},
+
+이거면 현재는 a에만 click이 걸려 있어서, span 눌러도 반응 안 하는 상태야.
+
+이렇게 바꾸면 됨
+
+_createPagerButton: function(text, css, handler) {
+    var self = this;
+
+    var $link = $("<a>")
+        .attr("href", EMPTY_HREF)
+        .html(text)
+        .on("click", $.proxy(handler, self));
+
+    var $span = $("<span>")
+        .addClass(css)
+        .append($link)
+        .on("click", function(e) {
+            if($(e.target).is("a")) {
+                return;
+            }
+
+            e.preventDefault();
+            handler.call(self, e);
+        });
+
+    return $span;
+},
+
+왜 이렇게 바꾸냐
+
+원래는:
+	•	<a> 클릭 → handler 실행
+
+이제는:
+	•	<a> 클릭 → 기존처럼 handler
+	•	<span> 클릭 → 직접 handler.call(self, e) 실행
+
+즉 span을 눌러도 a 누른 것과 같은 효과가 나.
+
+⸻
+
+더 단순하게 하려면
+
+내부 a를 강제로 클릭시키는 방식도 가능해:
+
+_createPagerButton: function(text, css, handler) {
+    var $link = $("<a>")
+        .attr("href", EMPTY_HREF)
+        .html(text)
+        .on("click", $.proxy(handler, this));
+
+    var $span = $("<span>")
+        .addClass(css)
+        .append($link)
+        .on("click", function(e) {
+            if($(e.target).is("a")) {
+                return;
+            }
+
+            e.preventDefault();
+            $link.trigger("click");
+        });
+
+    return $span;
+},
+
+이 방식도 잘 돼.
+
+⸻
+
+내가 더 추천하는 건
+
+두 번째 방식 ($link.trigger("click")) 이야.
+
+왜냐면:
+	•	기존 a 클릭 로직 그대로 재사용
+	•	handler 직접 호출보다 안전
+	•	혹시 a click 쪽에 나중에 로직 추가돼도 span도 같이 따라감
+
+즉 추천 최종본은 이거:
+
+_createPagerButton: function(text, css, handler) {
+    var $link = $("<a>")
+        .attr("href", EMPTY_HREF)
+        .html(text)
+        .on("click", $.proxy(handler, this));
+
+    var $span = $("<span>")
+        .addClass(css)
+        .append($link)
+        .on("click", function(e) {
+            if($(e.target).is("a")) {
+                return;
+            }
+
+            e.preventDefault();
+            $link.trigger("click");
+        });
+
+    return $span;
+},
+
+주의
+
+수정 후엔:
+	•	jsgrid.js 저장
+	•	브라우저 새로고침
+	•	캐시 때문에 안 바뀌면 강력 새로고침(Ctrl+F5)
+
+이렇게 해봐.
+
+원하면 내가 이 수정본에 현재 페이지(active page)는 span 클릭 안 하게 조건까지 넣어줄게.
+
 
 
 가능은 한데, 원본 수정이면 페이저 만드는 부분을 건드리면 돼.
