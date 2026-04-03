@@ -1,454 +1,258 @@
-핵심 원인은 A사이트가 아이디만 키로 보고 upsert 한다는 거야.
+그럼 원인이 거의 잡혔어.
 
-그래서 지금 흐름은 이렇게 깨져:
-	•	C에서 kim123 생성 → 2시간 뒤 A에 kim123 / 김씨 생성
-	•	한 달 뒤 B에서 같은 kim123로 이씨 생성 → 1일 뒤 A에 kim123 / 이씨 전송
-	•	A는 아이디가 있으니 update
-	•	결과: 김씨 권한 계정의 이름/정보가 이씨로 덮임
+이건 브레이크포인트 문제라기보다, API까지 가기 전에 HTTPS/TLS 연결 단계에서 깨지는 거야.
+그래서 api 주소 쪽 C# 브레이크포인트까지 아예 못 들어가는 것도 설명돼.
 
-즉 문제는 아이디 동일성 = 사용자 동일성으로 취급한 데 있어.
+지금 발생한 의미
 
-그런데 조건이:
-	•	A 수정 불가
-	•	B 수정 불가
-	•	C만 수정 가능
-	•	아이디는 셋 다 같아야 함
+client.PostAsync(...) 후 response.Wait()에서
 
-이면, C만으로 완전 해결은 불가능해.
-왜냐면 B가 나중에 같은 아이디를 A로 보내면 A가 또 덮어쓸 수 있기 때문이야.
+“예기치 않는 패킷 형식으로 인해 핸드셰이크가 실패”
 
-그래도 C 쪽에서 할 수 있는 현실적인 대응은 있어.
+이런 에러가 나면 보통:
+	•	서버에 요청은 보내려 했는데
+	•	HTTP/HTTPS 프로토콜이 안 맞거나
+	•	TLS 버전이 안 맞거나
+	•	인증서/SSL 설정이 꼬였거나
+	•	애초에 HTTPS로 붙어야 할 곳을 다른 방식으로 붙는 중
 
-결론
+이라는 뜻이야.
 
-C는 A에 계정 생성 메시지를 바로 보내지 말고, “검증 대기” 상태를 두고 늦게 보내거나, 보내기 전에 충돌 검증을 해야 해.
-
-하지만 이건 사후 덮어쓰기(B→A update) 까지 막지는 못해.
-즉 C만 고쳐서 할 수 있는 건 위험을 줄이는 것이지, 구조적으로 완전 차단은 못 해.
+즉, MVC → API 메서드 진입 전 SSL 연결 수립에서 실패
+→ 그래서 상대 API 코드 브레이크포인트 안 걸림.
 
 ⸻
 
-C에서 가능한 최선책
+제일 흔한 원인 순서
 
-1) C 가입 시 바로 A로 보내지 말고 “소유 확인” 절차 추가
+1. https:// 여야 하는데 http:// 또는 반대로 씀
 
-C에서 계정 생성 후 2시간 뒤 바로 A 전송하지 말고:
-	•	C 내부에 A전송대기 상태 저장
-	•	해당 아이디가 정말 그 사람 소유인지 검증
-	•	검증 완료 후에만 A로 전송
+예를 들어 API 서버가 HTTPS만 받는데 주소를 이상하게 넣으면 핸드셰이크 에러 날 수 있어.
 
-검증 방식 예:
-	•	C 가입자의 이름/휴대폰/이메일이 기존 동일 아이디 사용자 이력과 일치하는지
-	•	C에서 본인인증 추가
-	•	이미 동일 아이디가 과거 다른 이름으로 존재하면 A 전송 보류
+확인:
 
-즉 C가 할 수 있는 건
-“의심스러운 동일 아이디 신규 가입은 A에 보내지 않기” 야.
+var url = "https://...";
+
+주소가 정확히 http인지 https인지 먼저 봐.
 
 ⸻
 
-2) C 내부에 “아이디-실사용자 고유키” 매핑 테이블 만들기
+2. .NET Framework 4.7.2 쪽 TLS 설정 문제
 
-A/B/C 아이디는 같아야 하니까 아이디는 유지하되,
-C 내부에는 별도 식별자를 둬.
+구형 프로젝트에서 서버가 TLS 1.2만 허용하는데, 클라이언트가 예전 방식으로 붙으려 하면 실패할 수 있어.
+
+이럴 때 많이 넣는 게:
+
+System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+
+보통 호출 전에 한 번 설정해봄.
 
 예:
-	•	login_id = kim123
-	•	person_key = C 내부 고유값
-	•	verified_name
-	•	verified_phone
-	•	first_registered_at
 
-그리고 C에서 같은 아이디가 들어왔을 때:
-	•	과거 동일 아이디의 person_key와 충돌
-	•	이름/휴대폰이 다르면
-	•	A 전송 금지 + 관리자 검토
+System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 
-즉 C가 아이디 재사용 충돌 감지기 역할을 하게 만드는 거야.
+var responseTask = client.PostAsync(url, httpContent);
+responseTask.Wait();
+var response = responseTask.Result;
+
 
 ⸻
 
-3) C에서 A 전송 전에 A 현재 정보 조회 가능하면 비교 후 차단
+3. 인증서 문제
 
-A 조회 API나 DB 조회가 가능하다면 가장 좋음.
-
-C가 전송 전:
-	•	A의 kim123 현재 이름 조회
-	•	C 가입자 이름과 비교
-	•	다르면 전송하지 않음
-
-이 로직이면 적어도 C가 A를 잘못 덮는 일은 막을 수 있어.
-
-다만 네 사례는 B가 덮은 거라, 이것만으로는 B 문제까지는 못 막음.
-
-⸻
-
-4) C에서 “선점 등록” 전략
-
-C 사용자가 먼저 가입했으면 C는 그 아이디를 정상 소유 후보로 기록해두고,
-이후 같은 아이디로 다른 신원 정보가 들어오면 충돌로 간주.
+사내망/개발환경에서 흔함.
 
 예:
-	•	10월: kim123 / 김씨 → 정상 등록
-	•	11월: kim123 / 이씨 → 충돌 감지
-	•	C는 이런 아이디는 A에 절대 전송 안 함
+	•	자체 서명 인증서
+	•	인증서 체인 불완전
+	•	서버 이름과 인증서 CN 불일치
+	•	만료 인증서
 
-이건 C가 future damage를 줄이는 용도.
-
-⸻
-
-하지만 왜 완전 해결이 안 되냐
-
-B가 수정 불가라서:
-	•	B는 계속 kim123 / 이씨를 A에 보낼 수 있음
-	•	A는 계속 update 가능
-	•	C는 그걸 막을 권한이 없음
-
-즉 C만 수정해서 B가 A를 덮는 걸 차단할 수는 없어.
+이 경우도 API 액션까지 못 들어감.
 
 ⸻
 
-그래서 정확한 답
+4. API 주소가 실제 HTTPS API가 아님
 
-C만 수정해서 가능한 것
-	•	C발 잘못된 A 계정 생성/갱신 방지
-	•	동일 아이디 다른 실사용자 충돌 탐지
-	•	본인확인/검증 전에는 A 전송 금지
-	•	관리자 승인 후 전송
+가끔 URL이 API 주소처럼 보여도 실제로는:
+	•	다른 포트
+	•	다른 사이트
+	•	로드밸런서
+	•	게이트웨이
+	•	IIS 바인딩 안 맞음
 
-C만 수정해서 불가능한 것
-	•	B가 A를 잘못 update하는 것 자체 차단
-	•	A의 upsert 정책 변경
-	•	아이디만으로 사용자 동일성 판단하는 구조 해소
+이럴 수 있어.
 
-⸻
-
-실무적으로 제일 맞는 C 수정안
-
-이렇게 가는 게 제일 현실적이야:
-	1.	C 가입 시 즉시 A 전송 금지
-	2.	C 내부에 login_id + name + phone/email + verified_person_key 저장
-	3.	동일 login_id에 대해 과거 등록자와 신원정보가 다르면 충돌 상태로 전환
-	4.	충돌 상태에서는 A 전송 안 함
-	5.	관리자 검토 또는 본인확인 완료 후만 A 전송
-	6.	가능하면 A 조회 후 현재 사용자명과 비교해서 다르면 전송 차단
+예를 들어 https://server:포트/... 인데 그 포트가 HTTPS 바인딩이 아니면 핸드셰이크 실패 가능.
 
 ⸻
 
-진짜 근본 해결
+response.Wait()도 좀 별로야
 
-근본적으로는 A나 B 중 하나는 바뀌어야 해.
+이 코드:
 
-최소한 아래 중 하나가 필요:
-	•	A가 아이디만으로 update 하지 않기
-	•	B가 생성 메시지 보낼 때 사용자 고유 식별자 포함
-	•	A가 아이디 + 추가 식별값으로 동일인 판정
-	•	최초 시스템/마스터 계정 체계 도입
+var response = client.PostAsync(apiUrl, httpContent);
+response.Wait();
 
-⸻
+여기서 response는 실제 응답이 아니라 Task야.
 
-한 줄 결론
+그리고 .Wait()는 구형 ASP.NET에서 문제를 더 헷갈리게 만들기도 해.
 
-C만 고쳐서 할 수 있는 최선은 “동일 아이디의 다른 사람 가입을 감지하면 A 전송을 막는 검증/보류 로직”을 넣는 것이고,
-B가 A를 덮어쓰는 구조 자체는 C만으로는 완전 해결 불가야.
+차라리 에러 확인하려면 이렇게 보는 게 더 낫다:
 
+var responseTask = client.PostAsync(apiUrl, httpContent);
+responseTask.Wait();
+var httpResponse = responseTask.Result;
 
-응. 이 정규식은 “+국가코드-지역번호-번호-번호 형태만 허용” 하는 패턴이야. 그래서 지역번호가 없는 나라나 지역번호 길이가 1자리인 나라, 번호 구간 길이가 다른 나라에서 깨질 가능성이 커. 국제 전화번호는 ITU E.164 기준으로 최대 15자리이고 가변 길이라서, 국가별 번호 체계를 정규식 하나로 완벽하게 검증하기는 어렵다. libphonenumber 쪽도 전화번호에 대해 고정된 가정을 하면 쉽게 깨진다고 경고한다.  ￼
+또는 가능하면 async/await:
 
-네 코드가 C#이라면 실제 문자열은 보통 이렇게 써야 해.
+var httpResponse = await client.PostAsync(apiUrl, httpContent);
 
-static string mobileReg = "^([+]\\d{1,3}-\\d{2,3})-\\d{2,6}-\\d{2,6}$";
-
-또는 verbatim 문자열로 더 읽기 쉽게:
-
-static string mobileReg = @"^([+]\d{1,3}-\d{2,3})-\d{2,6}-\d{2,6}$";
-
-네가 적은 ₩₩d는 아마 에디터/폰트에서 \\d가 이상하게 보인 거고, 실제로는 \d를 뜻하는 거야.
-
-이 정규식을 해석하면 이래.
-
-^([+]\d{1,3}-\d{2,3})-\d{2,6}-\d{2,6}$
-
-	•	^ : 문자열 시작
-	•	[+] : + 문자 1개
-	•	\d{1,3} : 숫자 1~3자리, 보통 국가코드
-	•	- : 하이픈 1개
-	•	\d{2,3} : 숫자 2~3자리, 네 코드에선 지역번호로 가정
-	•	- : 하이픈 1개
-	•	\d{2,6} : 숫자 2~6자리
-	•	- : 하이픈 1개
-	•	\d{2,6} : 숫자 2~6자리
-	•	$ : 문자열 끝
-
-즉 허용 예시는 이런 느낌이야.
-	•	+82-10-1234-5678
-	•	+1-212-555-1234
-
-반대로 이런 건 막혀.
-	•	+65-1234-5678 → 지역번호 구간이 없어서 실패
-	•	+81-3-1234-5678 → 지역번호가 1자리라 실패
-	•	+44-20-7123-4567-89 → 구간이 더 많아서 실패
-
-그래서 이 정규식의 핵심 문제는 세 가지야.
-
-첫째, 지역번호가 반드시 있어야 한다고 가정하고 있어. 그런데 싱가포르·홍콩 같은 곳은 국내 지역번호 개념이 없어서 이 가정이 깨질 수 있어. 둘째, 지역번호를 2~3자리로 고정했는데, 실제로는 1자리인 경우도 있고 더 복잡한 경우도 있다. 셋째, 전체 번호 체계가 가변 길이인데 하이픈 위치와 구간 개수를 너무 강하게 고정했다. ITU E.164는 국제번호를 가변 길이로 정의하고 최대 15자리라고만 규정한다.  ￼
-
-그래서 네 요구처럼 지역번호 없는 나라도 통과시키려면, 최소한 지역번호 구간을 선택사항으로 바꿔야 해.
-
-추천 1안은 네 현재 포맷을 최대한 유지하면서 완화한 버전이야.
-
-static string mobileReg = @"^\+\d{1,3}(?:-\d{1,4})?-\d{2,6}-\d{2,6}$";
-
-이걸 해석하면:
-	•	^\+\d{1,3} : +와 국가코드 1~3자리
-	•	(?:-\d{1,4})? : -지역번호 구간은 있어도 되고 없어도 됨
-	•	-\d{2,6} : 다음 번호 구간
-	•	-\d{2,6}$ : 마지막 번호 구간
-
-이 패턴으로는 둘 다 돼.
-	•	+82-10-1234-5678
-	•	+65-1234-5678
-
-그리고 1자리 지역번호도 허용되니까 이것도 돼.
-	•	+81-3-1234-5678
-
-이 버전은 네 기존 UI 포맷을 거의 안 바꾸면서 가장 덜 위험하게 고친 거야.
-
-다만 이것도 한계는 있어. 예를 들어 어떤 나라는 번호를 2-2-2-2처럼 더 잘게 끊거나, 지역번호/가입자번호 길이가 훨씬 다양할 수 있다. 그래서 국제전화 “검증”을 엄밀하게 하려면 정규식만으로는 부족하고, 보통은 libphonenumber 같은 메타데이터 기반 라이브러리를 쓰는 쪽이 낫다. libphonenumber는 이런 “전화번호에 대한 잘못된 가정”을 정리해두고 있고, 국가별 파싱/검증을 위한 표준적인 선택지로 많이 쓰인다.  ￼
-
-그래도 “지금 당장 regex만 바꿔야 한다”면, 목적별로 이렇게 추천해.
-
-현재 입력 포맷을 유지하면서 지역번호 없는 나라까지 허용
-
-static string mobileReg = @"^\+\d{1,3}(?:-\d{1,4})?-\d{2,6}-\d{2,6}$";
-
-하이픈 구간 개수를 더 유연하게 허용
-
-static string mobileReg = @"^\+\d{1,3}(?:-\d{1,6}){2,3}$";
-
-이 두 번째는 뜻이:
-	•	+국가코드
-	•	뒤에 -숫자구간이 2번 또는 3번 온다
-
-즉 이런 걸 다 허용해.
-	•	+65-1234-5678
-	•	+82-10-1234-5678
-	•	+81-3-1234-5678
-
-이게 국제번호 UI 입력용으론 더 현실적이야.
-
-정리하면:
-
-현재 정규식:
-
-@"^([+]\d{1,3}-\d{2,3})-\d{2,6}-\d{2,6}$"
-
-추천 정규식:
-
-@"^\+\d{1,3}(?:-\d{1,4})?-\d{2,6}-\d{2,6}$"
-
-더 유연한 추천:
-
-@"^\+\d{1,3}(?:-\d{1,6}){2,3}$"
-
-내 추천은 두 번째보다 세 번째가 실무적으로 더 낫고, 진짜 제대로 하려면 저장/전송은 E.164 비슷하게 숫자 중심으로 하고, 표시만 국가별 포맷팅하는 방식이야. E.164는 최대 15자리 가변 길이여서, 포맷 고정 검증은 본질적으로 취약하다.  ￼
-
-원하면 내가 다음 답변에서 이 regex를 기준으로 허용 예시 / 실패 예시 표까지 만들어줄게.
-
-맞아. 딱 거기 수정하면 돼.
-
-지금 구조가:
-
-_createPagerButton: function(text, css, handler) {
-    var $link = $("<a>").attr("href", EMPTY_HREF).html(text).on("click", $.proxy(handler, this));
-
-    return $("<span>").addClass(css).append($link);
-},
-
-이거면 현재는 a에만 click이 걸려 있어서, span 눌러도 반응 안 하는 상태야.
-
-이렇게 바꾸면 됨
-
-_createPagerButton: function(text, css, handler) {
-    var self = this;
-
-    var $link = $("<a>")
-        .attr("href", EMPTY_HREF)
-        .html(text)
-        .on("click", $.proxy(handler, self));
-
-    var $span = $("<span>")
-        .addClass(css)
-        .append($link)
-        .on("click", function(e) {
-            if($(e.target).is("a")) {
-                return;
-            }
-
-            e.preventDefault();
-            handler.call(self, e);
-        });
-
-    return $span;
-},
-
-왜 이렇게 바꾸냐
-
-원래는:
-	•	<a> 클릭 → handler 실행
-
-이제는:
-	•	<a> 클릭 → 기존처럼 handler
-	•	<span> 클릭 → 직접 handler.call(self, e) 실행
-
-즉 span을 눌러도 a 누른 것과 같은 효과가 나.
+하지만 지금 핵심은 Wait()보다 TLS 핸드셰이크 실패 자체야.
 
 ⸻
 
-더 단순하게 하려면
+왜 API 브레이크포인트가 안 걸리냐
 
-내부 a를 강제로 클릭시키는 방식도 가능해:
+핵심 한 줄:
 
-_createPagerButton: function(text, css, handler) {
-    var $link = $("<a>")
-        .attr("href", EMPTY_HREF)
-        .html(text)
-        .on("click", $.proxy(handler, this));
+HTTP 요청 본문이 API까지 도착하기 전에 SSL/TLS 연결 단계에서 터져서
+컨트롤러 액션까지 못 간다.
 
-    var $span = $("<span>")
-        .addClass(css)
-        .append($link)
-        .on("click", function(e) {
-            if($(e.target).is("a")) {
-                return;
-            }
-
-            e.preventDefault();
-            $link.trigger("click");
-        });
-
-    return $span;
-},
-
-이 방식도 잘 돼.
+즉 순서가 이거야:
+	1.	클라이언트가 API 서버에 연결 시도
+	2.	TLS 핸드셰이크 시도
+	3.	여기서 실패
+	4.	그래서 서버 액션(Controller)은 실행조차 안 됨
+	5.	브레이크포인트도 안 걸림
 
 ⸻
 
-내가 더 추천하는 건
+바로 해볼 것
 
-두 번째 방식 ($link.trigger("click")) 이야.
+1. API 주소 확인
 
-왜냐면:
-	•	기존 a 클릭 로직 그대로 재사용
-	•	handler 직접 호출보다 안전
-	•	혹시 a click 쪽에 나중에 로직 추가돼도 span도 같이 따라감
+정확한 문자열 확인:
+	•	http://...
+	•	https://...
+	•	포트번호 포함 여부
 
-즉 추천 최종본은 이거:
+특히 운영/개발 주소가 섞여 있지 않은지 봐.
 
-_createPagerButton: function(text, css, handler) {
-    var $link = $("<a>")
-        .attr("href", EMPTY_HREF)
-        .html(text)
-        .on("click", $.proxy(handler, this));
+⸻
 
-    var $span = $("<span>")
-        .addClass(css)
-        .append($link)
-        .on("click", function(e) {
-            if($(e.target).is("a")) {
-                return;
-            }
+2. 호출 전에 TLS 1.2 강제
 
-            e.preventDefault();
-            $link.trigger("click");
-        });
+.NET Framework 4.7.2면 일단 이거 넣고 테스트 많이 해봄.
 
-    return $span;
-},
+System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 
-주의
+전체 예:
 
-수정 후엔:
-	•	jsgrid.js 저장
-	•	브라우저 새로고침
-	•	캐시 때문에 안 바뀌면 강력 새로고침(Ctrl+F5)
+System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 
-이렇게 해봐.
-
-원하면 내가 이 수정본에 현재 페이지(active page)는 span 클릭 안 하게 조건까지 넣어줄게.
+using (var client = new HttpClient())
+{
+    var responseTask = client.PostAsync(apiUrl, httpContent);
+    responseTask.Wait();
+    var httpResponse = responseTask.Result;
+}
 
 
+⸻
 
-가능은 한데, 원본 수정이면 페이저 만드는 부분을 건드리면 돼.
-jsGrid 1.5.3에는 pagerRenderer 옵션이 이미 있고, 이슈 답변에서도 내부 private 함수 _createPagerByFormat() 를 언급해. 즉 페이저 HTML을 만드는 핵심은 그쪽이야.  ￼
+3. Postman이나 브라우저로 같은 주소 호출
 
-네가 jsgrid.js를 직접 수정하겠다면, 압축본 말고 jsgrid.js 원본에서 아래 문자열로 검색해:
-	•	pagerRenderer
-	•	_createPagerByFormat
-	•	pageButtonCount
-	•	pagerFormat
+같은 주소를 직접 찍어봐.
+	•	Postman에서 되면 코드/TLS 설정 문제일 가능성
+	•	Postman도 안 되면 주소/인증서/서버 설정 문제 가능성 큼
 
-보통 수정 포인트는 이 흐름이야.
+⸻
 
-어디를 손대면 되나
-	1.	페이저 전체를 만드는 함수
-	•	보통 _createPager() 또는 _createPagerByFormat() 근처
-	2.	페이지 번호 한 개를 만드는 부분
-	•	여기서 <span> ... <a>1</a> ... </span> 같은 구조가 만들어짐
-	3.	그 페이지 번호 span 생성 직후에 클릭 이벤트를 붙이면 돼
+4. IIS 바인딩 확인
 
-즉, 코드 구조가 대략 이런 부분일 거야:
+API 서버 쪽이 IIS면 확인할 것:
+	•	해당 사이트에 https 바인딩 있는지
+	•	포트 맞는지
+	•	인증서 연결됐는지
 
-// 페이지 번호 span 생성
-var $page = $("<span>").addClass(this.pagerPageClass);
+⸻
 
-// 내부 a 생성
-var $link = $("<a>").attr("href", "#").text(pageIndex);
+5. 예외 메시지 내부까지 보기
 
-// 원래는 a에만 클릭이 걸려 있음
-$link.on("click", function(e) {
-    e.preventDefault();
-    // 페이지 이동 처리
-});
+InnerException 보면 더 정확함.
 
-여기서 네가 추가할 건 span 클릭 시 내부 a와 같은 동작이야.
+예:
 
-수정 방식
+try
+{
+    var responseTask = client.PostAsync(apiUrl, httpContent);
+    responseTask.Wait();
+}
+catch (Exception ex)
+{
+    var msg = ex.ToString();
+    throw;
+}
 
-가장 안전한 직접수정 형태는 이런 느낌이야:
+InnerException에
+	•	TLS version
+	•	authentication failed
+	•	certificate invalid
+같은 힌트가 더 나옴.
 
-$page.on("click", function(e) {
-    if($(e.target).is("a")) {
-        return;
-    }
+⸻
 
-    e.preventDefault();
-    $link.trigger("click");
-});
+개발환경에서만 확인용으로 하는 우회
 
-이걸 페이지 번호 하나를 만드는 자리에 넣으면:
-	•	숫자 링크 <a> 눌러도 원래처럼 동작
-	•	그 바깥 <span> 눌러도 같은 동작
+인증서 문제인지 확인만 하려면, 임시로 인증서 검증 무시해서 테스트하는 방법도 있긴 해.
+다만 이건 운영용으로 쓰면 안 됨.
 
-정리하면 수정할 위치
+var handler = new HttpClientHandler();
+handler.ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true;
 
-jsgrid.js에서 페이저 렌더링 쪽, 특히:
-	•	_createPagerByFormat()
-	•	또는 그 안에서 페이지 번호 element를 만드는 helper 부분
+using (var client = new HttpClient(handler))
+{
+    var response = client.PostAsync(apiUrl, httpContent).Result;
+}
 
-을 찾고,
-페이지 번호용 span과 a를 같이 만드는 코드 바로 아래에 span 클릭 핸들러를 추가하면 돼. _createPagerByFormat()이 pager 생성 핵심이라는 건 jsGrid 이슈 답변에도 나온다.  ￼
+이걸로 되면 거의 인증서 문제라고 봐도 됨.
 
-더 나은 방법
+하지만 이건 원인 확인용이지, 해결책은 아니야.
 
-솔직히는 원본 수정 말고, 전에 말한 것처럼 바깥에서:
+⸻
 
-$(document).on("click", ".jsgrid-pager span", function (e) {
-    if ($(e.target).is("a")) return;
-    $(this).find("a").first().trigger("click");
-});
+제일 가능성 높은 해결 방향
 
-이걸 붙이는 게 유지보수는 훨씬 좋아.
-jsGrid는 pagerRenderer로 커스텀 pager를 만들 수 있게 열어둔 라이브러리라, 원본 수정은 최후 수단으로 보는 게 맞아.  ￼
+네 상황이면 우선 이 순서 추천:
+	1.	API 주소가 https인지 확인
+	2.	포트가 맞는지 확인
+	3.	ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12; 추가
+	4.	Postman으로 동일 주소 호출
+	5.	그래도 안 되면 인증서/IIS 바인딩 확인
 
-네 jsgrid.js에서 페이저 만드는 함수 부분 코드 20~30줄만 붙여주면, 내가 정확히 어느 줄 아래에 넣으면 되는지 바로 찍어줄 수 있어.
+⸻
+
+참고로 코드도 이렇게 바꾸는 게 낫다
+
+지금보다 조금 더 명확하게:
+
+System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+
+using (var client = new HttpClient())
+{
+    var task = client.PostAsync(apiUrl, httpContent);
+    task.Wait();
+    var result = task.Result;
+
+    var bodyTask = result.Content.ReadAsStringAsync();
+    bodyTask.Wait();
+    var body = bodyTask.Result;
+}
+
+
+⸻
+
+한 줄 결론으로 말하면,
+API 브레이크포인트가 안 걸리는 이유는 그 API 액션까지 못 간 게 맞고, 원인은 거의 TLS/HTTPS 핸드셰이크 실패야.
+apiUrl 형태가 http/https + 포트까지 어떻게 되어 있는지만 보면 더 정확히 짚을 수 있어.
