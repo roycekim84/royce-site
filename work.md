@@ -1,64 +1,70 @@
-가능해.
-그 abc 값은 지금 코드상 tempid:temppw 문자열을 Base64로 인코딩한 값이라서, 역으로 Base64 디코딩하면 원문이 나와.
+응, 가능은 해.
 
-즉 원리는 이거야:
+Web.config 에 꼭 적어야만 DB 접속되는 건 아니고, 코드에서 직접 연결 문자열 써서 접속할 수도 있어.
 
-tempid:temppw
+예를 들면:
 
-를 ASCII 바이트로 바꾼 뒤 Base64로 만든 거라서,
-디코딩하면 다시 저 형태의 문자열이 나옴.
+using System.Data.SqlClient;
 
-역변환 코드
+string connStr = "Server=서버명;Database=DB명;User Id=아이디;Password=비번;";
 
-string abc = "여기에 base64값";
+using (SqlConnection conn = new SqlConnection(connStr))
+{
+    conn.Open();
 
-string decoded = Encoding.ASCII.GetString(Convert.FromBase64String(abc));
+    string sql = "SELECT * FROM 테이블명";
+    using (SqlCommand cmd = new SqlCommand(sql, conn))
+    using (SqlDataReader reader = cmd.ExecuteReader())
+    {
+        while (reader.Read())
+        {
+            var value = reader["컬럼명"].ToString();
+        }
+    }
+}
 
-// 보통 "id:pw" 형태
-string[] parts = decoded.Split(':');
+즉,
+	•	Web.config 없이도
+	•	코드 안에서 connection string 만들고
+	•	바로 특정 테이블 조회 가능
 
-string tempid = parts[0];
-string temppw = parts[1];
+근데 실무에선 보통 Web.config 나 appsettings.json 에 빼는 이유가 있어:
+	•	DB 주소 바뀌면 코드 수정 없이 설정만 바꾸려고
+	•	아이디/비번을 코드에 박아두면 위험해서
+	•	운영/개발 환경별로 다르게 쓰려고
 
+그리고 또 가능 한 방법은:
+	•	환경변수에서 읽기
+	•	별도 설정 파일에서 읽기
+	•	암호화된 저장소에서 읽기
 
-⸻
+즉 핵심은
+DB 접속 자체는 가능하지만, Web.config 는 “관리 편하게 하려고” 쓰는 거지 필수는 아니다 라고 보면 돼.
 
-예시
+단, 네가 지금 말하는 게
+“기존 프로젝트에서 Web.config 에 connectionString 안 보이는데도 DB 조회가 된다”
+이거면 다른 데서 가져오는 걸 수도 있어:
+	•	코드에 하드코딩
+	•	app.config
+	•	환경변수
+	•	공통 라이브러리 dll 내부
+	•	DI 등록 코드
+	•	암호화된 설정값 복호화
+	•	다른 설정 파일(json, xml 등)
 
-string abc = "YWJjOjEyMzQ=";
+이 경우엔 프로젝트 전체에서 이런 걸 검색해봐:
 
-string decoded = Encoding.ASCII.GetString(Convert.FromBase64String(abc));
-// decoded = "abc:1234"
+connectionString
+SqlConnection
+Server=
+Database=
+Initial Catalog=
+Data Source=
 
-string[] parts = decoded.Split(':');
+그리고 EF 쓰면:
 
-string tempid = parts[0];   // "abc"
-string temppw = parts[1];   // "1234"
+UseSqlServer
+DbContext
+OnConfiguring
 
-
-⸻
-
-주의할 점
-
-Split(':')는 보통 되는데,
-비밀번호 안에 : 문자가 들어있을 가능성이 있으면 그냥 Split(':') 하면 잘못 나눠질 수 있어.
-
-그럴 땐 첫 : 기준으로만 자르는 게 더 안전해:
-
-string abc = "여기에 base64값";
-
-string decoded = Encoding.ASCII.GetString(Convert.FromBase64String(abc));
-
-int idx = decoded.IndexOf(':');
-
-string tempid = decoded.Substring(0, idx);
-string temppw = decoded.Substring(idx + 1);
-
-
-⸻
-
-핵심
-
-Base64는 암호화가 아니라 인코딩이라서, 값만 알면 원래 문자열을 다시 볼 수 있어.
-
-abc 값을 주면 내가 바로 원문이 어떤 형식인지도 같이 풀어서 설명해줄 수 있어.
+원하면 내가 “이 프로젝트가 DB 접속 문자열을 어디서 읽는지 찾는 법” 순서대로 딱 짚어줄게.
